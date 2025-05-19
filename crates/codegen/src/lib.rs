@@ -76,5 +76,5 @@ pub fn protocol_write_to_file(stream: TokenStream) -> TokenStream {
 
     let out_file = config.out_file.as_os_str().to_str().unwrap();
 
-    quote! { include!(#out_file) }.into()
+    quote! { include!(#out_file); }.into()
 }

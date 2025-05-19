@@ -46,6 +46,8 @@ fn generate_interface(interface: &Interface) -> TokenStream {
             impl ::ecs_compositor_core::Interface for #typ_name {
                 const NAME:   &str = #name;
                 const VERSION: u32 = #version;
+
+                type Error = u32;
             }
 
             pub mod requests {
@@ -112,7 +114,7 @@ fn gen_field(arg: &Arg) -> TokenStream {
 
     quote! {
         #desc
-        #name: #typ,
+        pub #name: #typ,
     }
 }
 
