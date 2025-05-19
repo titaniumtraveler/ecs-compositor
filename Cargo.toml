@@ -1,6 +1,7 @@
 [workspace]
 members = ["crates/*"]
 exclude = ["forked/*"]
+resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
@@ -9,3 +10,13 @@ authors = ["Jon Heinritz <jon.heinritz@protonmail.com>"]
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/titaniumtraveler/ecs-compositor"
 repository = "https://github.com/titaniumtraveler/ecs-compositor"
+
+[workspace.dependencies]
+ecs-compositor-core = { path = "./crates/core" }
+ecs-compositor-codegen = { path = "./crates/codegen" }
+
+wayland-scanner-lib = { version = "0.31.6", path = "./forked/wayland-rs/wayland-scanner-lib" }
+
+bevy_ecs = "0.16.0"
+tokio = { version = "1.45.0", features = ["full"] }
+rustix = { version = "1.0.7", features = ["net"] }

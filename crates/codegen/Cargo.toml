@@ -1,0 +1,17 @@
+[package]
+name = "ecs-compositor-codegen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0.101"
+quote = "1.0.40"
+wayland-scanner-lib.workspace = true
+proc-macro2 = "1.0.95"

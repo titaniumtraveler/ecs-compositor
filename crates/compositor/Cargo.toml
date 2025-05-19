@@ -1,0 +1,18 @@
+[package]
+name = "ecs-compositor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+ecs-compositor-codegen.workspace = true
+ecs-compositor-core.workspace = true
+
+wayland-scanner-lib.workspace = true
+
+bevy_ecs.workspace = true
+rustix.workspace = true
+tokio.workspace = true
