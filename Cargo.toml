@@ -1,0 +1,11 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["forked/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Jon Heinritz <jon.heinritz@protonmail.com>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/titaniumtraveler/ecs-compositor"
+repository = "https://github.com/titaniumtraveler/ecs-compositor"
