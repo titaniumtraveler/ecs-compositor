@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use rustix::cmsg_space;
 use std::{collections::VecDeque, os::fd::OwnedFd};
 use tokio::net::UnixStream;
