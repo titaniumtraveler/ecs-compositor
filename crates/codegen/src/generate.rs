@@ -14,6 +14,8 @@ pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
     let name = mod_name(name);
     let interfaces = interfaces.iter().map(generate_interface);
     quote! {
+        #[allow(clippy::doc_lazy_continuation)]
+
         #desc
         pub mod #name {
             #(#interfaces)*
@@ -31,6 +33,13 @@ fn generate_interface(interface: &Interface) -> TokenStream {
         enums,
     } = interface;
 
+    let error = if let Some(error) = enums.iter().find(|e| e.name == "error") {
+        let name = typ_name(&error.name);
+        quote! {enums::#name}
+    } else {
+        quote! {u32}
+    };
+
     let mod_name = mod_name(name);
     let typ_name = typ_name(name);
     let desc = desc(&None, description);
@@ -47,7 +56,7 @@ fn generate_interface(interface: &Interface) -> TokenStream {
                 const NAME:   &str = #name;
                 const VERSION: u32 = #version;
 
-                type Error = u32;
+                type Error = #error;
             }
 
             pub mod requests {
@@ -78,9 +87,19 @@ fn generate_message(message: &Message) -> TokenStream {
     let desc = desc(&None, description);
     let fields = args.iter().map(gen_field);
 
+    let lifetime = if message
+        .args
+        .iter()
+        .any(|arg| matches!(arg.typ, Type::Array | Type::String))
+    {
+        quote! {'data}
+    } else {
+        TokenStream::default()
+    };
+
     quote! {
         #desc
-        pub struct #name {
+        pub struct #name<#lifetime> {
             #(#fields)*
         }
     }
@@ -101,14 +120,17 @@ fn gen_field(arg: &Arg) -> TokenStream {
     let desc = desc(summary, description);
 
     let typ = match typ {
-        Type::Int => quote! { i32 },
-        Type::Uint => quote! { u32 },
-        Type::Fixed => quote! { f64 },
-        Type::String => quote! { (std::ptr::NonNull<u32>, u32) },
-        Type::Object => quote! { std::num::NonZero<u32> },
-        Type::NewId => quote! { std::num::NonZero<u32> },
-        Type::Array => quote! { (std::ptr::NonNull<u32>, u32) },
-        Type::Fd => quote! { std::os::fd::OwnedFd },
+        Type::Int => quote! {    ecs_compositor_core::Int    },
+        Type::Uint => quote! {   ecs_compositor_core::UInt   },
+        Type::Fixed => quote! {  ecs_compositor_core::Fixed  },
+
+        Type::Array => quote! {  ecs_compositor_core::Array<'data>  },
+        Type::String => quote! { ecs_compositor_core::String<'data> },
+
+        Type::Object => quote! { ecs_compositor_core::Object },
+        Type::NewId => quote! {  ecs_compositor_core::NewId  },
+
+        Type::Fd => quote! {     ecs_compositor_core::Fd },
         Type::Destructor => unreachable!(),
     };
 
@@ -131,10 +153,45 @@ fn generate_enum(enum_: &Enum) -> TokenStream {
     let name = typ_name(name);
     let entries = entries.iter().map(gen_entry);
 
+    let impl_enum = impl_enum(enum_);
+
     quote! {
         #desc
+        #[derive(Debug, Clone, Copy)]
         pub enum #name {
             #(#entries)*
+        }
+
+        #impl_enum
+    }
+}
+
+fn impl_enum(enum_: &Enum) -> TokenStream {
+    let name = typ_name(&enum_.name);
+    let variants = enum_
+        .entries
+        .iter()
+        .map(|entry| {
+            let value = entry.value;
+            let name = typ_name(&entry.name);
+            quote! {
+                #value => Some(Self::#name),
+            }
+        })
+        .collect::<TokenStream>();
+
+    quote! {
+        impl ecs_compositor_core::Enum for #name {
+            fn from_u32(int: u32) -> Option<Self> {
+                match int {
+                    #variants
+                    _ => None,
+                }
+            }
+
+            fn to_u32(&self) -> u32 {
+                *self as u32
+            }
         }
     }
 }
