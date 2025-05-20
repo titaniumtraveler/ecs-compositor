@@ -1,5 +1,5 @@
 use proc_macro2::{Literal, TokenStream};
-use quote::{format_ident, quote};
+use quote::{TokenStreamExt, format_ident, quote};
 use wayland_scanner_lib::protocol::{Arg, Entry, Enum, Interface, Message, Protocol, Type};
 
 pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
@@ -43,7 +43,7 @@ fn generate_interface(interface: &Interface) -> TokenStream {
         #desc
         pub mod #mod_name {
             pub enum #typ_name {}
-            impl ::ecs_compositor_core::Interface for #typ_name {
+            impl ecs_compositor_core::Interface for #typ_name {
                 const NAME:   &str = #name;
                 const VERSION: u32 = #version;
 
@@ -158,23 +158,43 @@ fn gen_entry(entry: &Entry) -> TokenStream {
 
 fn desc(summary: &Option<String>, description: &Option<(String, String)>) -> TokenStream {
     let summary = summary.as_deref().unwrap_or("");
-    let (desc_short, desc) = if let Some((desc_short, desc)) = &description {
-        (desc_short.as_ref(), desc.as_ref())
+    let (desc_short, desc_long) = if let Some((desc_short, desc_long)) = &description {
+        (desc_short.as_ref(), desc_long.as_ref())
     } else {
         ("", "")
     };
 
-    let desc = format!("{summary}\n\n{desc_short}\n\n{desc}")
-        .lines()
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_owned();
-
-    quote! {
-        #[doc = #desc]
+    fn format_section(desc: &str) -> TokenStream {
+        desc.lines()
+            .map(str::trim)
+            .map(|str| [" ", str].into_iter().collect::<String>())
+            .map(|desc| quote! { #[doc = #desc] })
+            .collect()
     }
+
+    let mut desc = TokenStream::new();
+
+    if !summary.is_empty() {
+        desc.append_all(format_section(summary));
+    }
+
+    if !summary.is_empty() & !desc_short.is_empty() {
+        desc.append_all(quote! {#[doc = ""]});
+    }
+
+    if !desc_short.is_empty() {
+        desc.append_all(format_section(desc_short));
+    }
+
+    if !desc_short.is_empty() & !desc_long.is_empty() {
+        desc.append_all(quote! {#[doc = ""]});
+    }
+
+    if !desc_long.is_empty() {
+        desc.append_all(format_section(desc_long));
+    }
+
+    desc
 }
 
 fn mod_name(name: &str) -> syn::Ident {

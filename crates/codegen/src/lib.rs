@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use std::{ffi::OsString, fs::File, io::Write, path::PathBuf};
-use syn::{LitStr, Token, parse::Parse, parse_macro_input};
+use syn::{LitStr, Token, parse::Parse, parse_file, parse_macro_input};
 
 mod generate;
 
@@ -72,7 +72,10 @@ pub fn protocol_write_to_file(stream: TokenStream) -> TokenStream {
     let generated = generate::generate_protocol(&protocol);
 
     let mut f = File::create(&config.out_file).unwrap();
-    f.write_all(generated.to_string().as_bytes()).unwrap();
+
+    let file = parse_file(&generated.to_string()).unwrap();
+    f.write_all(prettyplease::unparse(&file).as_bytes())
+        .unwrap();
 
     let out_file = config.out_file.as_os_str().to_str().unwrap();
 
