@@ -3,10 +3,7 @@ use std::{mem::MaybeUninit, os::fd::RawFd};
 pub use self::{
     error::*,
     interface::Interface,
-    primitives::{
-        Array as WlArray, Enum as WlEnum, Fixed as WlFixed, Int as WlInt, NewId as WlNewId,
-        Object as WlObject, String as WlString, UInt as WlUInt,
-    },
+    primitives::{Array, Enum, Fd, Fixed, Int, NewId, Object, String, UInt},
 };
 
 pub mod error;
