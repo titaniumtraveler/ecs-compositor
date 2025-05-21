@@ -1,4 +1,3 @@
-ecs_compositor_codegen::protocol_write_to_file!(
-    "wayland-protocols/wayland/protocol/wayland.xml",
-    "target/wayland.xml.rs"
-);
+use ecs_compositor_codegen::protocol;
+
+protocol!(include( "wayland-protocols/wayland/protocol/wayland.xml" as "target/wayland.xml.rs"));

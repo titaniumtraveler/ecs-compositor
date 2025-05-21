@@ -1,9 +1,17 @@
 use proc_macro2::{Literal, TokenStream};
-use quote::{TokenStreamExt, format_ident, quote};
-use wayland_scanner_lib::protocol::{Arg, Entry, Enum, Interface, Message, Protocol, Type};
+use quote::{ToTokens, TokenStreamExt, format_ident, quote};
+use wayland_scanner_lib::protocol;
 
-pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
-    let Protocol {
+pub struct Protocol(pub protocol::Protocol);
+
+impl ToTokens for Protocol {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append_all(generate_protocol(&self.0));
+    }
+}
+
+pub fn generate_protocol(protocol: &protocol::Protocol) -> TokenStream {
+    let protocol::Protocol {
         name,
         description,
         interfaces,
@@ -23,8 +31,8 @@ pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
     }
 }
 
-fn generate_interface(interface: &Interface) -> TokenStream {
-    let Interface {
+fn generate_interface(interface: &protocol::Interface) -> TokenStream {
+    let protocol::Interface {
         name,
         version,
         description,
@@ -74,8 +82,8 @@ fn generate_interface(interface: &Interface) -> TokenStream {
     }
 }
 
-fn generate_message(message: &Message) -> TokenStream {
-    let Message {
+fn generate_message(message: &protocol::Message) -> TokenStream {
+    let protocol::Message {
         name,
         typ: _,
         since: _,
@@ -90,7 +98,7 @@ fn generate_message(message: &Message) -> TokenStream {
     let lifetime = if message
         .args
         .iter()
-        .any(|arg| matches!(arg.typ, Type::Array | Type::String))
+        .any(|arg| matches!(arg.typ, protocol::Type::Array | protocol::Type::String))
     {
         quote! {'data}
     } else {
@@ -105,8 +113,8 @@ fn generate_message(message: &Message) -> TokenStream {
     }
 }
 
-fn gen_field(arg: &Arg) -> TokenStream {
-    let Arg {
+fn gen_field(arg: &protocol::Arg) -> TokenStream {
+    let protocol::Arg {
         name,
         typ,
         interface: _,
@@ -120,18 +128,18 @@ fn gen_field(arg: &Arg) -> TokenStream {
     let desc = desc(summary, description);
 
     let typ = match typ {
-        Type::Int => quote! {    ecs_compositor_core::Int    },
-        Type::Uint => quote! {   ecs_compositor_core::UInt   },
-        Type::Fixed => quote! {  ecs_compositor_core::Fixed  },
+        protocol::Type::Int => quote! {    ecs_compositor_core::Int    },
+        protocol::Type::Uint => quote! {   ecs_compositor_core::UInt   },
+        protocol::Type::Fixed => quote! {  ecs_compositor_core::Fixed  },
 
-        Type::Array => quote! {  ecs_compositor_core::Array<'data>  },
-        Type::String => quote! { ecs_compositor_core::String<'data> },
+        protocol::Type::Array => quote! {  ecs_compositor_core::Array<'data>  },
+        protocol::Type::String => quote! { ecs_compositor_core::String<'data> },
 
-        Type::Object => quote! { ecs_compositor_core::Object },
-        Type::NewId => quote! {  ecs_compositor_core::NewId  },
+        protocol::Type::Object => quote! { ecs_compositor_core::Object },
+        protocol::Type::NewId => quote! {  ecs_compositor_core::NewId  },
 
-        Type::Fd => quote! {     ecs_compositor_core::Fd },
-        Type::Destructor => unreachable!(),
+        protocol::Type::Fd => quote! {     ecs_compositor_core::Fd },
+        protocol::Type::Destructor => unreachable!(),
     };
 
     quote! {
@@ -140,8 +148,8 @@ fn gen_field(arg: &Arg) -> TokenStream {
     }
 }
 
-fn generate_enum(enum_: &Enum) -> TokenStream {
-    let Enum {
+fn generate_enum(enum_: &protocol::Enum) -> TokenStream {
+    let protocol::Enum {
         name,
         since: _,
         description,
@@ -166,7 +174,7 @@ fn generate_enum(enum_: &Enum) -> TokenStream {
     }
 }
 
-fn impl_enum(enum_: &Enum) -> TokenStream {
+fn impl_enum(enum_: &protocol::Enum) -> TokenStream {
     let name = typ_name(&enum_.name);
     let variants = enum_
         .entries
@@ -196,8 +204,8 @@ fn impl_enum(enum_: &Enum) -> TokenStream {
     }
 }
 
-fn gen_entry(entry: &Entry) -> TokenStream {
-    let Entry {
+fn gen_entry(entry: &protocol::Entry) -> TokenStream {
+    let protocol::Entry {
         name,
         value,
         since: _,
