@@ -1,5 +1,6 @@
-use crate::generate;
-use quote::{ToTokens, quote};
+use crate::generate::generate_protocol;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt, quote};
 use std::{
     env,
     fs::{File, read_to_string},
@@ -8,14 +9,11 @@ use std::{
 };
 use syn::{LitStr, parse::Parse};
 use verbs::Verb;
-use wayland_scanner_lib::{
-    parse,
-    protocol::{self, Protocol},
-};
+use wayland_scanner_lib::{parse, protocol::Protocol};
 
 pub enum GenerateConfig {
     Include { path: PathBuf, token: LitStr },
-    Inline { to_tokens: generate::Protocol },
+    Inline { protocol: Protocol },
     None,
 }
 
@@ -80,9 +78,7 @@ impl Parse for GenerateConfig {
             Verb::Generate { xml, out } => {
                 let protocol = read_xml_to_protocol(workspace, &xml)?;
                 match out {
-                    None => Ok(Self::Inline {
-                        to_tokens: generate::Protocol(protocol),
-                    }),
+                    None => Ok(Self::Inline { protocol }),
                     Some(out) => {
                         write_tokens_to_file(protocol, workspace, &out)?;
                         Ok(Self::None)
@@ -98,10 +94,7 @@ impl ToTokens for GenerateConfig {
         match self {
             GenerateConfig::Include { path, token } => {
                 if let Some(path) = path.to_str() {
-                    quote! {
-                        include!(#path);
-                    }
-                    .to_tokens(tokens);
+                    quote! { include!(#path); }.to_tokens(tokens);
                 } else {
                     syn::Error::new(
                         token.span(),
@@ -117,7 +110,7 @@ impl ToTokens for GenerateConfig {
                     .to_tokens(tokens)
                 }
             }
-            GenerateConfig::Inline { to_tokens } => to_tokens.to_tokens(tokens),
+            GenerateConfig::Inline { protocol } => tokens.append_all(generate_protocol(protocol)),
             GenerateConfig::None => {}
         }
     }
@@ -135,13 +128,15 @@ fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result<Protocol> 
 }
 
 fn write_tokens_to_file(
-    protocol: protocol::Protocol,
+    protocol: Protocol,
     base_dir: impl AsRef<Path>,
     out: &LitStr,
 ) -> syn::Result<PathBuf> {
     let path = relative_path(base_dir, out.value());
-    let content = generate::Protocol(protocol).into_token_stream().to_string();
-    let file = syn::parse_file(&content)?;
+    let mut content = TokenStream::new();
+    content.append_all(generate_protocol(&protocol));
+
+    let file = syn::parse_file(&content.to_string())?;
     let formatted = prettyplease::unparse(&file);
 
     File::create(&path)
