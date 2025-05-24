@@ -2,7 +2,7 @@
 
 use crate::{
     Interface,
-    primitives::{Enum, Object},
+    primitives::{self, Enum, Object},
 };
 use std::num::NonZero;
 
@@ -10,7 +10,7 @@ pub enum WlDisplay {}
 
 impl WlDisplay {
     /// `wl_display` is **always** available at id 1
-    pub const OBJECT: Object<WlDisplay> = Object::from_id(NonZero::new(1).unwrap());
+    pub const OBJECT: Object = Object::from_id(NonZero::new(1).unwrap());
 }
 
 impl Interface for WlDisplay {
@@ -38,8 +38,8 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn msg(self, msg: &'static str) -> crate::Error<WlDisplay> {
-        WlDisplay::OBJECT.err(self, msg)
+    pub fn msg(self, msg: &'static str) -> primitives::Error {
+        primitives::Error { err: self, msg }
     }
 }
 

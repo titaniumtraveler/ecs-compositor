@@ -1,11 +1,9 @@
 use crate::{
-    Result,
-    primitives::{Primitive, read_4_bytes, write_copy_of_slice},
-    wl_display::{self, WlDisplay},
+    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
+    wl_display,
 };
 use std::{
     marker::PhantomData,
-    mem::MaybeUninit,
     num::NonZero,
     os::unix::prelude::RawFd,
     ptr::{self, NonNull},
@@ -26,11 +24,11 @@ pub struct Array<'a> {
 impl<'data> Primitive<'data> for Array<'data> {
     #[inline]
     fn len(&self) -> u32 {
-        4 + align_to_4(self.len)
+        4 + pad_to_4(self.len)
     }
 
     #[inline]
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self, WlDisplay> {
+    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
         let (ptr, len) =
             read_data(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read array"))?;
 
@@ -42,12 +40,8 @@ impl<'data> Primitive<'data> for Array<'data> {
     }
 
     #[inline]
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &mut &mut [MaybeUninit<RawFd>],
-    ) -> Result<(), WlDisplay> {
-        write_data(self.ptr, self.len, data, self.len());
+    fn write(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+        write_data(self.ptr, self.len, data);
         Ok(())
     }
 }
@@ -65,11 +59,11 @@ impl<'data> Primitive<'data> for String<'data> {
     #[inline]
     fn len(&self) -> u32 {
         let header = u32::BITS / 8;
-        header + align_to_4(self.len.into())
+        header + pad_to_4(self.len.into())
     }
 
     #[inline]
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self, WlDisplay> {
+    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
         let (ptr, len) =
             read_data(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read string"))?;
 
@@ -84,12 +78,8 @@ impl<'data> Primitive<'data> for String<'data> {
     }
 
     #[inline]
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &mut &mut [MaybeUninit<RawFd>],
-    ) -> Result<(), WlDisplay> {
-        write_data(self.ptr, self.len.into(), data, self.len());
+    fn write(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+        write_data(self.ptr, self.len.get(), data);
         Ok(())
     }
 }
@@ -101,7 +91,7 @@ impl<'data> Primitive<'data> for Option<String<'data>> {
     }
 
     #[inline]
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self, WlDisplay> {
+    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
         let (ptr, len) =
             read_data(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read string"))?;
 
@@ -116,26 +106,33 @@ impl<'data> Primitive<'data> for Option<String<'data>> {
     }
 
     #[inline]
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &mut &mut [MaybeUninit<RawFd>],
-    ) -> Result<(), WlDisplay> {
-        let (src, len, size) = match self {
-            Some(string) => (string.ptr, string.len.get(), string.len()),
-            None => (None, 0, 4),
+    fn write(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+        let (src, len) = match self {
+            Some(string) => (string.ptr, string.len.get()),
+            None => (None, 0),
         };
-        write_data(src, len, data, size);
+        write_data(src, len, data);
         Ok(())
     }
 }
 
-const fn align_to_4(x: u32) -> u32 {
-    const fn align_to<const ALIGN: u32>(x: u32) -> u32 {
-        (x + (ALIGN - 1)) & !(ALIGN - 1)
+const fn pad_to_4(x: u32) -> u32 {
+    const fn pad_to<const ALIGN: u32>(x: u32) -> u32 {
+        ((x + (ALIGN - 1)) & !(ALIGN - 1)) - x
     }
 
-    align_to::<4>(x)
+    pad_to::<4>(x)
+}
+
+#[allow(clippy::identity_op)]
+#[test]
+fn test_align_to_4() {
+    for i in 0..=16 {
+        assert_eq!(pad_to_4(i * 4 + 0), 0);
+        assert_eq!(pad_to_4(i * 4 + 1), 3);
+        assert_eq!(pad_to_4(i * 4 + 2), 2);
+        assert_eq!(pad_to_4(i * 4 + 3), 1);
+    }
 }
 
 #[inline]
@@ -143,36 +140,30 @@ fn read_data<'data>(data: &mut &'data [u8]) -> Option<(&'data [u8], u32)> {
     let [a, b, c, d] = read_4_bytes(data)?;
     let len = u32::from_ne_bytes([a, b, c, d]);
 
-    let (str, tail) = data.split_at_checked(align_to_4(len) as usize)?;
+    let (str, tail) = data.split_at_checked((len + pad_to_4(len)) as usize)?;
     *data = tail;
 
     Some((str, len))
 }
 
 #[inline]
-fn write_data<'o: 'i, 'i>(
-    src: Option<NonNull<u8>>,
-    len: u32,
-    data: &'o mut &'i mut [MaybeUninit<u8>],
-    size: u32,
-) {
-    let (mut buf, tail) = data.split_at_mut(size as usize);
-    *data = tail;
+fn write_data(src: Option<NonNull<u8>>, len: u32, data: &mut ThickPtr<u8>) {
+    unsafe {
+        // Write len header
+        data.write_slice(&len.to_ne_bytes());
 
-    write_copy_of_slice(&mut buf[..4], &len.to_ne_bytes());
-    buf = &mut buf[4..];
+        let Some(src) = src else {
+            // The actual data was already written, so only write the header
+            data.advance((len + pad_to_4(len)) as usize);
 
-    let Some(src) = src else {
-        // The actual data was already written, so only write the header
-        return;
-    };
+            return;
+        };
 
-    // SAFETY: `self.ptr` + `self.len` are guarantied to point to valid data.
-    let src = unsafe { &*ptr::slice_from_raw_parts(src.as_ptr(), len as usize) };
-    write_copy_of_slice(&mut buf[..(len as usize)], src);
-    buf = &mut buf[(len as usize)..];
+        // SAFETY: `self.ptr` + `self.len` are guarantied to point to valid data.
+        let src = &*ptr::slice_from_raw_parts(src.as_ptr(), len as usize);
+        data.write_slice(src);
 
-    // Explicitly zero out the padding bytes.
-    const PADDING: [u8; 4] = [0; 4];
-    write_copy_of_slice(buf, &PADDING[..buf.len()]);
+        // Explicitly zero out the padding bytes.
+        data.write_zeros(pad_to_4(len) as usize);
+    }
 }

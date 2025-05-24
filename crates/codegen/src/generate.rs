@@ -1,33 +1,34 @@
 use crate::generate::flat_map_fn::IteratorExt;
 use proc_macro2::{Literal, TokenStream};
-use quote::{format_ident, quote};
-use wayland_scanner_lib::protocol;
+use quote::{ToTokens, format_ident, quote};
+use std::fmt::Write;
+use wayland_scanner_lib::protocol::{Arg, Entry, Enum, Interface, Message, Protocol, Type};
 
 mod flat_map_fn;
 
-pub fn generate_protocol(protocol: &protocol::Protocol) -> TokenStream {
-    let protocol::Protocol {
+pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
+    let Protocol {
         name,
         description,
         interfaces,
         ..
     } = protocol;
 
-    let desc = desc(desc_as_iter(description));
+    let docs = Docs::Global.description(description);
     let name = mod_name(name);
     let interfaces = interfaces.iter().map(generate_interface);
     quote! {
-        #[allow(clippy::doc_lazy_continuation)]
-
-        #desc
+        #[allow(unused_variables,unused_mut,unused_imports)]
+        #[allow(clippy::doc_lazy_continuation,clippy::identity_op)]
         pub mod #name {
+            #docs
             #(#interfaces)*
         }
     }
 }
 
-fn generate_interface(interface: &protocol::Interface) -> TokenStream {
-    let protocol::Interface {
+fn generate_interface(interface: &Interface) -> TokenStream {
+    let Interface {
         name,
         version,
         description,
@@ -43,42 +44,74 @@ fn generate_interface(interface: &protocol::Interface) -> TokenStream {
         quote! {u32}
     };
 
-    let mod_name = mod_name(name);
     let typ_name = typ_name(name);
-    let desc = desc(desc_as_iter(description));
+    let mod_name = mod_name(name);
 
-    let requests = requests.iter().map(generate_message);
-    let events = events.iter().map(generate_message);
-    let enums = enums.iter().map(generate_enum);
+    let docs = Docs::Global.description(description);
 
-    quote! {
-        #desc
-        pub mod #mod_name {
+    let iface_name = {
+        let version = Literal::u32_unsuffixed(*version);
+
+        quote! {
+            use {
+                super::super::interfaces::*,
+                std::os::fd::RawFd,
+                ecs_compositor_core::*,
+            };
+
             pub enum #typ_name {}
-            impl ecs_compositor_core::Interface for #typ_name {
+            impl Interface for #typ_name {
                 const NAME:   &str = #name;
                 const VERSION: u32 = #version;
 
-                type Error = #error;
+                type Error         = #error;
             }
+        }
+    };
 
+    let requests = {
+        let requests = requests.iter().map(|msg| generate_message(msg, &typ_name));
+        quote! {
             pub mod requests {
+                use super::*;
                 #(#requests)*
             }
-
+        }
+    };
+    let events = {
+        let events = events.iter().map(|msg| generate_message(msg, &typ_name));
+        quote! {
             pub mod events {
+                use super::*;
                 #(#events)*
             }
-
+        }
+    };
+    let enums = {
+        let enums = enums.iter().map(generate_enum);
+        quote! {
             pub mod enums {
+                use super::*;
                 #(#enums)*
             }
+        }
+    };
+
+    quote! {
+        pub mod #mod_name {
+            #docs
+
+            #iface_name
+
+            #requests
+            #events
+            #enums
         }
     }
 }
 
-fn generate_message(message: &protocol::Message) -> TokenStream {
-    let protocol::Message {
+fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
+    let Message {
         name,
         typ: _,
         since: _,
@@ -87,32 +120,106 @@ fn generate_message(message: &protocol::Message) -> TokenStream {
     } = message;
 
     let name = typ_name(name);
-    let desc = desc(desc_as_iter(description));
-    let fields = args.iter().map(gen_field);
 
     let lifetime = if message
         .args
         .iter()
-        .any(|arg| matches!(arg.typ, protocol::Type::Array | protocol::Type::String))
+        .any(|arg| matches!(arg.typ, Type::Array | Type::String))
     {
-        quote! {'data}
+        quote! {<'data>}
     } else {
-        TokenStream::default()
+        quote! {}
+    };
+
+    let item = {
+        let docs = Docs::Local.description(description);
+
+        let fields = args.iter().map(gen_field);
+
+        quote! {
+            #docs
+            pub struct #name #lifetime {
+                #(#fields)*
+            }
+        }
+    };
+
+    let impl_message = {
+        let fd_count = Literal::usize_unsuffixed(
+            args.iter()
+                .filter(|arg| matches!(arg.typ, Type::Fd))
+                .count(),
+        );
+
+        let fields_read = args.iter().map(|arg| {
+            let name = mod_name(&arg.name);
+            let typ = match arg.typ {
+                Type::Int => quote! {    Int    },
+                Type::Uint => quote! {   UInt   },
+                Type::Fixed => quote! {  Fixed  },
+                Type::String => quote! { String },
+                Type::Object => quote! { Object },
+                Type::NewId => quote! {  NewId  },
+                Type::Array => quote! {  Array  },
+                Type::Fd => quote! {     Fd     },
+                Type::Destructor => unreachable!(),
+            };
+            quote! {
+                #name: #typ::read(&mut data, &mut fds)?,
+            }
+        });
+
+        let fields_write_len = args.iter().map(|arg| {
+            let name = mod_name(&arg.name);
+            quote! {
+                + self.#name.len()
+            }
+        });
+
+        let fields_write = args.iter().map(|arg| {
+            let name = mod_name(&arg.name);
+            quote! {
+                self.#name.write(data,fds)?;
+            }
+        });
+
+        quote! {
+            impl<'data> Message<'data,#fd_count,#iface_name> for #name #lifetime {
+                fn read(mut data: &'data [u8], fds: &[RawFd; #fd_count]) -> primitives::Result<Self> {
+                    let mut fds = fds.as_slice();
+                    Ok(Self {
+                        #(#fields_read)*
+                    })
+                }
+
+                fn write_len(&self) -> u32 {
+                    0 #(#fields_write_len)*
+                }
+
+               fn write<'a>(
+                   &self,
+                   data: &mut ThickPtr<u8>,
+                   fds: &mut ThickPtr<RawFd>,
+               ) -> primitives::Result<()> {
+                   #(#fields_write)*
+                   Ok(())
+               }
+
+            }
+        }
     };
 
     quote! {
-        #desc
-        pub struct #name<#lifetime> {
-            #(#fields)*
-        }
+        #item
+        #impl_message
     }
 }
 
-fn gen_field(arg: &protocol::Arg) -> TokenStream {
-    let protocol::Arg {
+fn gen_field(arg: &Arg) -> TokenStream {
+    let Arg {
         name,
         typ,
-        interface: _,
+        interface,
         summary,
         description,
         allow_null: _,
@@ -120,36 +227,37 @@ fn gen_field(arg: &protocol::Arg) -> TokenStream {
     } = arg;
 
     let name = mod_name(name);
-    let desc = desc(
-        summary
-            .as_deref()
-            .into_iter()
-            .chain(desc_as_iter(description)),
-    );
+    let docs = Docs::Local.summary(summary, description);
+
+    let interface = interface.as_ref().map(|interface| {
+        let mod_name = mod_name(interface);
+        let typ_name = typ_name(interface);
+        quote! {<#mod_name::#typ_name>}
+    });
 
     let typ = match typ {
-        protocol::Type::Int => quote! {    ecs_compositor_core::Int    },
-        protocol::Type::Uint => quote! {   ecs_compositor_core::UInt   },
-        protocol::Type::Fixed => quote! {  ecs_compositor_core::Fixed  },
+        Type::Int => quote! {    Int    },
+        Type::Uint => quote! {   UInt   },
+        Type::Fixed => quote! {  Fixed  },
 
-        protocol::Type::Array => quote! {  ecs_compositor_core::Array<'data>  },
-        protocol::Type::String => quote! { ecs_compositor_core::String<'data> },
+        Type::Array => quote! {  Array <'data> },
+        Type::String => quote! { String<'data> },
 
-        protocol::Type::Object => quote! { ecs_compositor_core::Object },
-        protocol::Type::NewId => quote! {  ecs_compositor_core::NewId  },
+        Type::Object => quote! { Object #interface },
+        Type::NewId => quote! {  NewId  #interface },
 
-        protocol::Type::Fd => quote! {     ecs_compositor_core::Fd },
-        protocol::Type::Destructor => unreachable!(),
+        Type::Fd => quote! {     Fd },
+        Type::Destructor => unreachable!(),
     };
 
     quote! {
-        #desc
+        #docs
         pub #name: #typ,
     }
 }
 
-fn generate_enum(enum_: &protocol::Enum) -> TokenStream {
-    let protocol::Enum {
+fn generate_enum(enum_: &Enum) -> TokenStream {
+    let Enum {
         name,
         since: _,
         description,
@@ -157,14 +265,14 @@ fn generate_enum(enum_: &protocol::Enum) -> TokenStream {
         bitfield: _,
     } = enum_;
 
-    let desc = desc(desc_as_iter(description));
+    let docs = Docs::Local.description(description);
     let name = typ_name(name);
     let entries = entries.iter().map(gen_entry);
 
     let impl_enum = impl_enum(enum_);
 
     quote! {
-        #desc
+        #docs
         #[derive(Debug, Clone, Copy)]
         pub enum #name {
             #(#entries)*
@@ -174,13 +282,13 @@ fn generate_enum(enum_: &protocol::Enum) -> TokenStream {
     }
 }
 
-fn impl_enum(enum_: &protocol::Enum) -> TokenStream {
+fn impl_enum(enum_: &Enum) -> TokenStream {
     let name = typ_name(&enum_.name);
     let variants = enum_
         .entries
         .iter()
         .map(|entry| {
-            let value = entry.value;
+            let value = Literal::u32_unsuffixed(entry.value);
             let name = typ_name(&entry.name);
             quote! {
                 #value => Some(Self::#name),
@@ -189,7 +297,7 @@ fn impl_enum(enum_: &protocol::Enum) -> TokenStream {
         .collect::<TokenStream>();
 
     quote! {
-        impl ecs_compositor_core::Enum for #name {
+        impl Enum for #name {
             fn from_u32(int: u32) -> Option<Self> {
                 match int {
                     #variants
@@ -204,8 +312,8 @@ fn impl_enum(enum_: &protocol::Enum) -> TokenStream {
     }
 }
 
-fn gen_entry(entry: &protocol::Entry) -> TokenStream {
-    let protocol::Entry {
+fn gen_entry(entry: &Entry) -> TokenStream {
+    let Entry {
         name,
         value,
         since: _,
@@ -213,50 +321,102 @@ fn gen_entry(entry: &protocol::Entry) -> TokenStream {
         summary,
     } = entry;
     let name = typ_name(name);
-    let desc = desc(
-        summary
-            .as_deref()
-            .into_iter()
-            .chain(desc_as_iter(description)),
-    );
+    let docs = Docs::Local.summary(summary, description);
     let value = Literal::u32_unsuffixed(*value);
     quote! {
-        #desc
+        #docs
         #name = #value,
     }
 }
 
-fn desc_as_iter(description: &Option<(String, String)>) -> impl Iterator<Item = &str> {
-    description
-        .as_ref()
-        .map(|(a, b)| [a.as_str(), b.as_str()])
-        .into_iter()
-        .flatten()
+#[derive(Clone, Copy)]
+enum Docs {
+    Global,
+    Local,
 }
 
-fn desc<'a>(iter: impl Iterator<Item = &'a str>) -> TokenStream {
-    iter.filter(|str| !str.is_empty())
-        .map(|desc| {
-            desc.lines().map({
-                let mut buf = String::new();
-                move |str| {
-                    buf.clear();
-                    buf.extend([" ", str]);
-                    quote! { #[doc = #buf] }
-                }
+impl Docs {
+    fn to_attr<T: ToTokens>(self, msg: T) -> TokenStream {
+        match self {
+            Docs::Global => {
+                quote! { #![doc = #msg] }
+            }
+            Docs::Local => {
+                quote! { #[doc = #msg] }
+            }
+        }
+    }
+
+    fn with_iter<'a>(self, iter: impl Iterator<Item = &'a str>) -> TokenStream {
+        iter.filter(|str| !str.is_empty())
+            .map(|desc| {
+                desc.lines().map({
+                    let mut buf = String::new();
+                    move |str| {
+                        buf.clear();
+                        buf.reserve(str.len() + 1);
+
+                        buf += " ";
+
+                        const PATTERN: &[char] = &['[', ']'];
+                        for next in str.split_inclusive(PATTERN) {
+                            let mut segment = next.chars();
+                            match segment.next_back() {
+                                Some(char) => {
+                                    if PATTERN.contains(&char) {
+                                        buf += segment.as_str();
+                                        buf += "\\";
+                                        buf.write_char(char).unwrap();
+                                    } else {
+                                        buf += next;
+                                    }
+                                }
+                                None => todo!(),
+                            }
+                        }
+
+                        self.to_attr(&buf)
+                    }
+                })
             })
-        })
-        .iter_flat_map(
-            |iter| iter.next(),
-            move |iter, acc| match acc {
-                None => {
-                    *acc = Some(iter.next()?);
-                    Some(quote! { #[doc = ""]})
-                }
-                Some(iter) => iter.next(),
-            },
+            .iter_flat_map(
+                |iter| iter.next(),
+                move |iter, acc| match acc {
+                    None => {
+                        *acc = Some(iter.next()?);
+                        Some(self.to_attr(""))
+                    }
+                    Some(iter) => iter.next(),
+                },
+            )
+            .collect()
+    }
+
+    fn description(self, description: &Option<(String, String)>) -> TokenStream {
+        self.with_iter(
+            description
+                .as_ref()
+                .map(|(a, b)| [a.as_str(), b.as_str()])
+                .into_iter()
+                .flatten(),
         )
-        .collect()
+    }
+
+    fn summary(
+        self,
+        summary: &Option<String>,
+        description: &Option<(String, String)>,
+    ) -> TokenStream {
+        self.with_iter(
+            summary.as_deref().into_iter().chain(
+                description
+                    .as_ref()
+                    .map(|(a, b)| [a.as_str(), b.as_str()])
+                    .into_iter()
+                    .flatten(),
+            ),
+        )
+    }
 }
 
 fn mod_name(name: &str) -> syn::Ident {

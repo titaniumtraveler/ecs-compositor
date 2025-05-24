@@ -1,9 +1,9 @@
 use crate::{
-    Error, Interface, Result,
-    primitives::{Primitive, read_4_bytes, write_4_bytes},
-    wl_display::{self, WlDisplay},
+    Error, Interface,
+    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
+    wl_display,
 };
-use std::{marker::PhantomData, mem::MaybeUninit, num::NonZero, os::unix::prelude::RawFd};
+use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
 
 /// 32-bit object ID.
 /// A null value is represented with an ID of 0.
@@ -48,7 +48,7 @@ impl<I: Interface> Primitive<'_> for Object<I> {
         4
     }
 
-    fn read(data: &mut &[u8], _: &mut &[RawFd]) -> crate::Result<Self, WlDisplay> {
+    fn read(data: &mut &[u8], _: &mut &[RawFd]) -> Result<Self> {
         let id = read_id(data)?
             .ok_or(wl_display::Error::InvalidMethod.msg("null object not allowed here"))?;
 
@@ -58,12 +58,10 @@ impl<I: Interface> Primitive<'_> for Object<I> {
         })
     }
 
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &'o mut &'i mut [MaybeUninit<RawFd>],
-    ) -> crate::Result<(), WlDisplay> {
-        write_4_bytes(data, self.id.get().to_ne_bytes());
+    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+        unsafe {
+            data.write_4_bytes(self.id.get().to_ne_bytes());
+        }
         Ok(())
     }
 }
@@ -73,7 +71,7 @@ impl<I: Interface> Primitive<'_> for Option<Object<I>> {
         4
     }
 
-    fn read(data: &mut &[u8], _: &mut &[RawFd]) -> crate::Result<Self, WlDisplay> {
+    fn read(data: &mut &[u8], _: &mut &[RawFd]) -> Result<Self> {
         match read_id(data)? {
             None => Ok(None),
             Some(id) => Ok(Some(Object {
@@ -83,13 +81,11 @@ impl<I: Interface> Primitive<'_> for Option<Object<I>> {
         }
     }
 
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &'o mut &'i mut [MaybeUninit<RawFd>],
-    ) -> crate::Result<(), WlDisplay> {
+    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
         let id = self.as_ref().map(|object| object.id.get()).unwrap_or(0);
-        write_4_bytes(data, id.to_ne_bytes());
+        unsafe {
+            data.write_4_bytes(id.to_ne_bytes());
+        }
         Ok(())
     }
 }
@@ -128,12 +124,12 @@ impl<I: Interface> NewId<I> {
     }
 }
 
-impl Primitive<'_> for NewId {
+impl<I: Interface> Primitive<'_> for NewId<I> {
     fn len(&self) -> u32 {
         4
     }
 
-    fn read(data: &mut &'_ [u8], _: &mut &[RawFd]) -> Result<Self, WlDisplay> {
+    fn read(data: &mut &'_ [u8], _: &mut &[RawFd]) -> Result<Self> {
         let id = read_id(data)?
             .ok_or(wl_display::Error::InvalidMethod.msg("new_id is not allowed to be 0"))?;
 
@@ -143,17 +139,15 @@ impl Primitive<'_> for NewId {
         })
     }
 
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &'o mut &'i mut [MaybeUninit<RawFd>],
-    ) -> Result<(), WlDisplay> {
-        write_4_bytes(data, self.id.get().to_ne_bytes());
+    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+        unsafe {
+            data.write_4_bytes(self.id.get().to_ne_bytes());
+        }
         Ok(())
     }
 }
 
-fn read_id(data: &mut &[u8]) -> Result<Option<NonZero<u32>>, WlDisplay> {
+fn read_id(data: &mut &[u8]) -> Result<Option<NonZero<u32>>> {
     let bytes = read_4_bytes(data)
         .ok_or(wl_display::Error::InvalidMethod.msg("failed to read object id"))?;
 

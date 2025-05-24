@@ -1,4 +1,4 @@
-use crate::primitives::Enum;
+use crate::primitives::*;
 
 pub trait Interface {
     const NAME: &str;

@@ -1,8 +1,8 @@
 use crate::{
-    primitives::{Primitive, read_4_bytes, write_4_bytes},
-    wl_display::{self, WlDisplay},
+    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
+    wl_display,
 };
-use std::{mem::MaybeUninit, os::unix::prelude::RawFd};
+use std::os::unix::prelude::RawFd;
 
 /// Fixed-point number
 ///
@@ -41,19 +41,17 @@ impl Primitive<'_> for Fixed {
         4
     }
 
-    fn read(data: &mut &'_ [u8], _: &mut &[RawFd]) -> crate::Result<Self, WlDisplay> {
+    fn read(data: &mut &'_ [u8], _: &mut &[RawFd]) -> Result<Self> {
         let bytes = read_4_bytes(data)
             .ok_or(wl_display::Error::InvalidMethod.msg("failed to read fixed-point"))?;
 
         Ok(Fixed(i32::from_ne_bytes(bytes)))
     }
 
-    fn write<'o: 'i, 'i>(
-        &self,
-        data: &'o mut &'i mut [MaybeUninit<u8>],
-        _: &'o mut &'i mut [MaybeUninit<RawFd>],
-    ) -> crate::Result<(), WlDisplay> {
-        write_4_bytes(data, self.0.to_ne_bytes());
+    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+        unsafe {
+            data.write_4_bytes(self.0.to_ne_bytes());
+        }
         Ok(())
     }
 }

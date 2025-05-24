@@ -72,7 +72,7 @@ impl Parse for GenerateConfig {
         match verb {
             Verb::Include { xml, out } => {
                 let protocol = read_xml_to_protocol(workspace, &xml)?;
-                let path = write_tokens_to_file(protocol, workspace, &out)?;
+                let path = write_tokens_to_file(protocol, workspace, &out, true)?;
                 Ok(Self::Include { path, token: out })
             }
             Verb::Generate { xml, out } => {
@@ -80,7 +80,7 @@ impl Parse for GenerateConfig {
                 match out {
                     None => Ok(Self::Inline { protocol }),
                     Some(out) => {
-                        write_tokens_to_file(protocol, workspace, &out)?;
+                        write_tokens_to_file(protocol, workspace, &out, false)?;
                         Ok(Self::None)
                     }
                 }
@@ -121,30 +121,61 @@ fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result<Protocol> 
 
     parse::try_parse(
         read_to_string(&path)
-            .map_err(|err| syn::Error::new(xml.span(), err))?
+            .map_err(|err| {
+                syn::Error::new(
+                    xml.span(),
+                    format!(
+                        "failed to read file {path} with {err}",
+                        path = path.display()
+                    ),
+                )
+            })?
             .as_bytes(),
     )
-    .map_err(|err| syn::Error::new(xml.span(), err))
+    .map_err(|err| {
+        syn::Error::new(
+            xml.span(),
+            format!(
+                "failed to parse xml {path} with {err}",
+                path = path.display()
+            ),
+        )
+    })
 }
 
 fn write_tokens_to_file(
     protocol: Protocol,
     base_dir: impl AsRef<Path>,
     out: &LitStr,
+    formatted: bool,
 ) -> syn::Result<PathBuf> {
     let path = relative_path(base_dir, out.value());
-    let mut content = TokenStream::new();
-    content.append_all(generate_protocol(&protocol));
+    let mut content = {
+        let mut tokens = TokenStream::new();
+        tokens.append_all(generate_protocol(&protocol));
+        tokens.to_string()
+    };
+    let mut res = Ok(());
 
-    let file = syn::parse_file(&content.to_string())?;
-    let formatted = prettyplease::unparse(&file);
+    if formatted {
+        match syn::parse_file(&content) {
+            Ok(file) => content = prettyplease::unparse(&file),
+            Err(err) => {
+                // std::fmt::Write::write_fmt(&mut content, format_args!("{err:?}")).unwrap();
+                res = Err(syn::Error::new(
+                    out.span(),
+                    format!("failed to reparse file for formatting: {err}"),
+                ))
+            }
+        }
+    }
 
     File::create(&path)
         .unwrap()
-        .write_all(formatted.as_bytes())
+        .write_all(content.as_bytes())
         .unwrap();
 
-    Ok(path)
+    res.map(|()| path)
 }
 
 fn relative_path(base_dir: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
