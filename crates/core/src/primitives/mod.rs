@@ -2,7 +2,7 @@ use crate::wl_display::{self, WlDisplay};
 use std::{
     ops::Add,
     os::fd::RawFd,
-    ptr::{self, slice_from_raw_parts_mut},
+    ptr::{self, NonNull, slice_from_raw_parts_mut},
 };
 
 mod array;
@@ -50,7 +50,7 @@ impl From<Error> for crate::Error {
 ///
 /// This type is inherently unsafe and should be used with care!
 pub struct ThickPtr<T> {
-    pub ptr: *mut T,
+    pub ptr: NonNull<T>,
     pub len: usize,
 }
 
@@ -78,7 +78,7 @@ impl<T> ThickPtr<T> {
         // - The caller guaranties that src and dst are properly aligned.
         // - The caller guaranties that src and dst are non-overlapping.
         unsafe {
-            ptr::copy_nonoverlapping(src, dst, len);
+            ptr::copy_nonoverlapping(src, dst.as_ptr(), len);
         }
 
         // SAFETY: Caller guaranties safety.
@@ -88,7 +88,7 @@ impl<T> ThickPtr<T> {
 
         // SAFETY: Constructing this `slice` from `dst` and `len` is safe, because it points to
         // valid and initialized data that we have mutable access to.
-        unsafe { &mut *slice_from_raw_parts_mut(dst, len) }
+        unsafe { &mut *slice_from_raw_parts_mut(dst.as_ptr(), len) }
     }
 
     /// # Safety
@@ -119,7 +119,7 @@ impl ThickPtr<u8> {
         let dst = self.ptr;
 
         unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), dst, 4);
+            ptr::copy_nonoverlapping(bytes.as_ptr(), dst.as_ptr(), 4);
         }
 
         unsafe {
@@ -131,7 +131,7 @@ impl ThickPtr<u8> {
     /// See [`Self::write_slice()`]
     pub unsafe fn write_zeros(&mut self, count: usize) {
         unsafe {
-            ptr::write_bytes(self.ptr, 0u8, count);
+            ptr::write_bytes(self.ptr.as_ptr(), 0u8, count);
             self.advance(count);
         }
     }
