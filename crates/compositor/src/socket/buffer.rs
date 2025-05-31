@@ -1,4 +1,5 @@
 use std::{
+    cmp,
     os::fd::RawFd,
     ptr,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -122,36 +123,39 @@ impl<T> Subqueue<T> {
     fn allocate(&self, len: usize) -> Option<SubqueueHandle<'_, T>> {
         let mut write_next = self.write_next.load(Ordering::Acquire);
         let mut write_until = self.write_until.load(Ordering::Acquire);
+        let mut new_write_next;
 
         loop {
             'enough_space: {
                 if write_until <= write_next {
                     let available_space = self.capacity - write_next;
                     if len < available_space {
+                        new_write_next = write_next + len;
                         break 'enough_space;
                     }
 
-                    if write_until != 0 {
-                        // Wrap around
-                        write_next = 0;
-                    } else {
-                        // The queue is full, so the wrap around failed.
+                    if write_next == self.capacity {
+                        // The queue is marked as full, so the allocation failed
                         return None;
                     }
 
-                    // Try again with the wrap around
+                    // Wrap around and try again
+                    write_next = 0;
                 }
 
                 let available_space = write_until - write_next;
-                if available_space < len {
-                    return None;
+                match available_space.cmp(&len) {
+                    cmp::Ordering::Less => return None,
+                    // Marking the queue as full.
+                    cmp::Ordering::Equal => new_write_next = self.capacity,
+                    cmp::Ordering::Greater => new_write_next = write_next + len,
                 }
             }
 
             // Actually allocate our new data
             match self.write_next.compare_exchange_weak(
                 write_next,
-                write_next + len,
+                new_write_next,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
@@ -164,15 +168,14 @@ impl<T> Subqueue<T> {
             }
         }
 
-        let index = write_next;
         // SAFETY:
         // We have just allocated the buffer, so handing out a mutable reference to it, which will
         // be exclusively be used by holders of the handle, is fine.
-        let data = unsafe { ptr::slice_from_raw_parts_mut(self.buf.add(index), len) };
+        let data = unsafe { ptr::slice_from_raw_parts_mut(self.buf.add(write_next), len) };
 
         Some(SubqueueHandle {
             queue: self,
-            index,
+            index: write_next,
             data,
         })
     }
