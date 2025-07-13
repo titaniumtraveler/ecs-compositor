@@ -1,5 +1,6 @@
 use std::{
-    cmp,
+    alloc::Layout,
+    cmp, mem,
     os::fd::RawFd,
     ptr,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -27,6 +28,22 @@ struct MessageQueue {
 const PROCESSING: usize = usize::MAX;
 
 impl MessageQueue {
+    fn new(msgs: usize, data: usize, fds: usize) -> Self {
+        use std::alloc;
+
+        unsafe {
+            let buf: *mut Message =
+                alloc::alloc(Layout::array::<Message>(msgs).expect("invalid amount of messages"))
+                    as _;
+            let data: *mut u8 =
+                alloc::alloc(Layout::array::<u8>(data).expect("invalid amount of data bytes")) as _;
+            let fds: *mut RawFd =
+                alloc::alloc(Layout::array::<RawFd>(fds).expect("invalid amount of fds")) as _;
+
+            todo!()
+        }
+    }
+
     fn allocate_message(&self, data: usize, fds: usize) -> Option<MessageHandle<'_>> {
         let mut write_next = self.write_next.load(Ordering::Acquire);
 
@@ -221,11 +238,21 @@ struct MessageHandle<'a> {
     fds: *mut [RawFd],
 }
 
+#[derive(Debug)]
 struct Message {
     is_active: AtomicBool,
 
     data_start: usize,
     fds_start: usize,
+}
+
+impl Message {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = Self {
+        is_active: AtomicBool::new(false),
+        data_start: 0,
+        fds_start: 0,
+    };
 }
 
 struct Subqueue<T> {
@@ -303,4 +330,12 @@ impl<T> Subqueue<T> {
             data,
         })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_alloc_dealloc() {}
 }
