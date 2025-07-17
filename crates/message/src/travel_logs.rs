@@ -1,7 +1,10 @@
 use std::{
     alloc::Layout,
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
+
+#[cfg(test)]
+mod tests;
 
 struct Buffer<T: Message> {
     buf: *mut [T::Item],
@@ -30,7 +33,7 @@ struct Handle<'a, T: Message> {
 }
 
 impl<T: Message> Buffer<T> {
-    unsafe fn new(message: T, len: usize) -> Self {
+    fn new(message: T, len: usize) -> Self {
         let buf = unsafe { std::alloc::alloc(Layout::array::<T::Item>(len).unwrap()) };
 
         Self {
@@ -56,7 +59,7 @@ impl<T: Message> Buffer<T> {
         slot_new: usize,
         data_next: usize,
         data_new: usize,
-    ) -> Option<Handle<T>> {
+    ) -> Option<Handle<'_, T>> {
         match self.slot_next.compare_exchange(
             slot_next,
             slot_new,
