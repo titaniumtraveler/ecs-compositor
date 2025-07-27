@@ -18,7 +18,7 @@ pub use self::{
     fd::Fd,
     fixed::Fixed,
     int::{Int, UInt},
-    object::{NewId, Object},
+    object::{NewId, NewIdDyn, Object},
 };
 
 #[allow(clippy::len_without_is_empty)] // We are not a collection

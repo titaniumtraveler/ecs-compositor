@@ -1,5 +1,5 @@
 use crate::{
-    Error, Interface,
+    Error, Interface, String, UInt,
     primitives::{Primitive, Result, ThickPtr, read_4_bytes},
     wl_display,
 };
@@ -143,6 +143,33 @@ impl<I: Interface> Primitive<'_> for NewId<I> {
         unsafe {
             data.write_4_bytes(self.id.get().to_ne_bytes());
         }
+        Ok(())
+    }
+}
+
+pub struct NewIdDyn<'data> {
+    pub name: String<'data>,
+    pub version: UInt,
+    pub id: NewId,
+}
+
+impl<'data> Primitive<'data> for NewIdDyn<'data> {
+    fn len(&self) -> u32 {
+        self.name.len() + self.version.len() + self.id.len()
+    }
+
+    fn read(data: &mut &'data [u8], fds: &mut &[RawFd]) -> Result<Self> {
+        Ok(Self {
+            name: String::read(data, fds)?,
+            version: UInt::read(data, fds)?,
+            id: NewId::read(data, fds)?,
+        })
+    }
+
+    fn write(&self, data: &mut ThickPtr<u8>, fds: &mut ThickPtr<RawFd>) -> Result<()> {
+        self.name.write(data, fds)?;
+        self.version.write(data, fds)?;
+        self.id.write(data, fds)?;
         Ok(())
     }
 }

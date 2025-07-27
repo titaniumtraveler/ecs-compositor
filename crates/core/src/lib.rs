@@ -4,7 +4,7 @@ pub use self::{
     error::*,
     interface::Interface,
     primitives::Primitive,
-    primitives::{Array, Enum, Fd, Fixed, Int, NewId, Object, String, ThickPtr, UInt},
+    primitives::{Array, Enum, Fd, Fixed, Int, NewId, NewIdDyn, Object, String, ThickPtr, UInt},
 };
 
 pub mod error;

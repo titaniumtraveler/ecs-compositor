@@ -121,11 +121,9 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
 
     let name = typ_name(name);
 
-    let lifetime = if message
-        .args
-        .iter()
-        .any(|arg| matches!(arg.typ, Type::Array | Type::String))
-    {
+    let lifetime = if message.args.iter().any(|arg| {
+        matches!(arg.typ, Type::Array | Type::String | Type::NewId if arg.interface.is_none())
+    }) {
         quote! {<'data>}
     } else {
         quote! {}
@@ -154,6 +152,8 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
         let fields_read = args.iter().map(|arg| {
             let name = mod_name(&arg.name);
             let typ = match arg.typ {
+                Type::NewId if arg.interface.is_none() => quote! { NewIdDyn },
+
                 Type::Int => quote! {    Int    },
                 Type::Uint => quote! {   UInt   },
                 Type::Fixed => quote! {  Fixed  },
@@ -242,6 +242,8 @@ fn gen_field(arg: &Arg) -> TokenStream {
 
         Type::Array => quote! {  Array <'data> },
         Type::String => quote! { String<'data> },
+
+        Type::NewId if interface.is_none() => quote! {  NewIdDyn <'data> },
 
         Type::Object => quote! { Object #interface },
         Type::NewId => quote! {  NewId  #interface },
