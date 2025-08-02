@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{
     alloc::Layout,
     sync::atomic::{AtomicUsize, Ordering},
@@ -17,23 +19,68 @@ struct Buffer<T: Message> {
     data_free: AtomicUsize,
 }
 
-trait Message {
+/// # Safety
+/// Implementing this incorrectly will cause undefined behavior
+unsafe trait Message {
     const MAX_SLOTS: usize;
     type Item;
+
+    /// Allocate
+    unsafe fn alloc(&self, new: PointRange);
+    /// Mark as dead/ready to be freed.
+    /// Return `Some(point)`, if the slot is in control and should deallocate that `range`.
+    /// `Range::EMPTY` is used when either only slot, or data is not allocated
+    unsafe fn mark_dead(&self, dead: PointRange) -> Option<PointRange>;
+    /// Free the range and return the point until which it should actually be freed.
+    unsafe fn dealloc(&self, free: PointRange) -> Point;
 }
 
 struct Handle<'a, T: Message> {
     buf: &'a Buffer<T>,
+    range: PointRange,
+}
 
-    slot_start: usize,
-    slot_end: usize,
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct Point {
+    pub slot: usize,
+    pub data: usize,
+}
 
-    data_start: usize,
-    data_end: usize,
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct PointRange {
+    pub slot: Range,
+    pub data: Range,
+}
+
+impl PointRange {
+    unsafe fn to(&self) -> Point {
+        let PointRange {
+            slot: Range { from: _, to: slot },
+            data: Range { from: _, to: data },
+        } = self;
+
+        Point {
+            slot: *slot,
+            data: *data,
+        }
+    }
+}
+
+/// Range of values. Might wrap.
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct Range {
+    /// inclusive start of the range
+    pub from: usize,
+    /// exclusive end of the range
+    pub to: usize,
+}
+
+impl Range {
+    pub const EMPTY: Self = Range { from: 0, to: 0 };
 }
 
 impl<T: Message> Buffer<T> {
-    fn new(message: T, len: usize) -> Self {
+    pub fn new(message: T, len: usize) -> Self {
         let buf = unsafe { std::alloc::alloc(Layout::array::<T::Item>(len).unwrap()) };
 
         Self {
@@ -46,6 +93,19 @@ impl<T: Message> Buffer<T> {
         }
     }
 
+    fn allocated_range(&self) -> PointRange {
+        PointRange {
+            slot: Range {
+                from: self.slot_free.load(Ordering::Relaxed),
+                to: self.slot_next.load(Ordering::Relaxed),
+            },
+            data: Range {
+                from: self.data_free.load(Ordering::Relaxed),
+                to: self.data_next.load(Ordering::Relaxed),
+            },
+        }
+    }
+
     /// # Safety
     ///
     /// Caller has to guarantie that:
@@ -53,16 +113,10 @@ impl<T: Message> Buffer<T> {
     /// - data_next..data_new is valid
     ///
     /// Those ranges are valid if: TODO actually define that
-    unsafe fn allocate(
-        &self,
-        slot_next: usize,
-        slot_new: usize,
-        data_next: usize,
-        data_new: usize,
-    ) -> Option<Handle<'_, T>> {
+    pub unsafe fn allocate(&self, range: PointRange) -> Option<Handle<'_, T>> {
         match self.slot_next.compare_exchange(
-            slot_next,
-            slot_new,
+            range.slot.from,
+            range.slot.to,
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
@@ -79,26 +133,36 @@ impl<T: Message> Buffer<T> {
         }
 
         match self.data_next.compare_exchange(
-            data_next,
-            data_new,
+            range.data.from,
+            range.data.to,
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
             // return handle
-            Ok(_) => Some(Handle {
-                buf: self,
-                slot_start: slot_next,
-                slot_end: slot_new,
-                data_start: data_next,
-                data_end: data_new,
-            }),
-            // play dead and return none
+            Ok(_) => Some(Handle { buf: self, range }),
+            // mark slots as dead and return none
             Err(_) => {
-                // TODO: mark slots as dead
-                eprintln!("marking slots as dead is not yet implemented!!!");
+                unsafe {
+                    self.mark_dead(PointRange {
+                        slot: range.slot,
+                        data: Range::EMPTY,
+                    });
+                }
+
                 None
             }
         }
+    }
+
+    /// # Safety
+    ///
+    /// Caller has to guarantie that they have control over the range.
+    pub unsafe fn mark_dead(&self, range: PointRange) {
+        unsafe {
+            if let Some(free) = self.data.mark_dead(range) {
+                self.dealloc(free);
+            }
+        };
     }
 
     /// # Safety
@@ -107,11 +171,10 @@ impl<T: Message> Buffer<T> {
     /// - has control over `slot_free` and `slot_free` is alive
     /// - has control over the slots they are deallocating
     /// - has control over the data they are deallocating
-    unsafe fn dealloc(&self, slot_free: usize, data_free: usize) {
-        // TODO: actually mark those slots as alive again
-        // TODO: also search for the next active slot instead of using just the end
-        self.slot_free.store(slot_free, Ordering::Release);
-        self.data_free.store(data_free, Ordering::Release);
+    pub unsafe fn dealloc(&self, free: PointRange) {
+        let free = unsafe { self.data.dealloc(free) };
+        self.slot_free.store(free.slot, Ordering::Release);
+        self.data_free.store(free.data, Ordering::Release);
     }
 }
 
