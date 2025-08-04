@@ -1,1 +1,1 @@
-mod travel_logs;
+pub mod travel_logs;
