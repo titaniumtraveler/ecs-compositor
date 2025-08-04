@@ -8,9 +8,9 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-pub struct Buffer<T: Message> {
-    buf: *mut [T::Item],
-    data: T,
+pub struct Buffer<T: Metadata> {
+    buf: *mut [T::Data],
+    metadata: T,
 
     slot_next: AtomicUsize,
     slot_free: AtomicUsize,
@@ -19,14 +19,14 @@ pub struct Buffer<T: Message> {
     data_free: AtomicUsize,
 }
 
-unsafe impl<T: Message + Sync> Sync for Buffer<T> {}
-unsafe impl<T: Message + Send> Send for Buffer<T> {}
+unsafe impl<T: Metadata + Sync> Sync for Buffer<T> {}
+unsafe impl<T: Metadata + Send> Send for Buffer<T> {}
 
-impl<T: Message + Debug> Debug for Buffer<T> {
+impl<T: Metadata + Debug> Debug for Buffer<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Buffer")
             .field("buf", &self.buf)
-            .field("data", &self.data)
+            .field("metadata", &self.metadata)
             .field("slot_next", &self.slot_next)
             .field("slot_free", &self.slot_free)
             .field("data_next", &self.data_next)
@@ -36,15 +36,21 @@ impl<T: Message + Debug> Debug for Buffer<T> {
 }
 
 /// # Safety
+///
 /// Implementing this incorrectly will cause undefined behavior
-pub unsafe trait Message {
-    const MAX_SLOTS: usize;
-    type Item;
+pub unsafe trait Metadata {
+    type Handle;
+    type Data;
+
+    /// Get `slot` and `data` capacity.
+    fn capacity(&self) -> Point;
 
     /// Allocate
+    ///
     /// # Safety
+    ///
     /// TODO
-    unsafe fn alloc(&self, new: PointRange);
+    unsafe fn alloc(&self, new: PointRange) -> Self::Handle;
     /// Mark as dead/ready to be freed.
     /// Return `Some(point)`, if the slot is in control and should deallocate that `range`.
     /// `Range::EMPTY` is used when either only slot, or data is not allocated
@@ -52,7 +58,12 @@ pub unsafe trait Message {
     /// # Safety
     ///
     /// Caller has to guarantie that they have control over the range.
-    unsafe fn mark_dead(&self, allocated: PointRange, dead: PointRange) -> Option<PointRange>;
+    unsafe fn mark_dead(
+        &self,
+        allocated: PointRange,
+        dead: PointRange,
+        handle: Self::Handle,
+    ) -> Option<PointRange>;
     /// Free the range and return the point until which it should actually be freed.
     ///
     /// # Safety
@@ -63,12 +74,13 @@ pub unsafe trait Message {
 }
 
 #[derive(Debug)]
-pub struct Handle<'a, T: Message> {
+pub struct Handle<'a, T: Metadata> {
     buf: &'a Buffer<T>,
     range: PointRange,
+    handle: T::Handle,
 }
 
-impl<'a, T: Message> Handle<'a, T> {
+impl<'a, T: Metadata> Handle<'a, T> {
     pub fn into_raw(self) -> PointRange {
         let range = self.range;
         std::mem::forget(self);
@@ -76,14 +88,7 @@ impl<'a, T: Message> Handle<'a, T> {
     }
 
     pub fn dealloc(self) {
-        unsafe { self.buf.mark_dead(self.range) };
-        std::mem::forget(self);
-    }
-}
-
-impl<'a, T: Message> Drop for Handle<'a, T> {
-    fn drop(&mut self) {
-        unsafe { self.buf.mark_dead(self.range) }
+        unsafe { self.buf.mark_dead(self.range, self.handle) };
     }
 }
 
@@ -136,7 +141,7 @@ impl Range {
     pub fn invert(self, capacity: usize) -> Self {
         Self {
             from: self.upto,
-            upto: self.from.checked_sub(1).unwrap_or(capacity),
+            upto: self.from.checked_sub(1).unwrap_or(capacity - 1),
         }
     }
 
@@ -152,13 +157,14 @@ impl Range {
     }
 }
 
-impl<T: Message> Buffer<T> {
-    pub fn new(message: T, len: usize) -> Self {
-        let buf = unsafe { std::alloc::alloc(Layout::array::<T::Item>(len).unwrap()) };
+impl<T: Metadata> Buffer<T> {
+    pub fn new(message: T) -> Self {
+        let Point { data: len, .. } = message.capacity();
+        let buf = unsafe { std::alloc::alloc(Layout::array::<T::Data>(len).unwrap()) };
 
         Self {
-            buf: std::ptr::slice_from_raw_parts_mut(buf as *mut T::Item, len),
-            data: message,
+            buf: std::ptr::slice_from_raw_parts_mut(buf as *mut T::Data, len),
+            metadata: message,
             slot_next: AtomicUsize::new(0),
             slot_free: AtomicUsize::new(0),
             data_next: AtomicUsize::new(0),
@@ -169,8 +175,12 @@ impl<T: Message> Buffer<T> {
     /// # Safety
     ///
     /// Must be valid handle
-    pub unsafe fn handle_from_raw(&self, range: PointRange) -> Handle<'_, T> {
-        Handle { buf: self, range }
+    pub unsafe fn handle_from_raw(&self, range: PointRange, handle: T::Handle) -> Handle<'_, T> {
+        Handle {
+            buf: self,
+            range,
+            handle,
+        }
     }
 
     #[allow(dead_code)]
@@ -220,14 +230,27 @@ impl<T: Message> Buffer<T> {
             Ordering::Acquire,
         ) {
             // return handle
-            Ok(_) => Some(Handle { buf: self, range }),
+            Ok(_) => Some(Handle {
+                buf: self,
+                handle: unsafe { self.metadata.alloc(range) },
+                range,
+            }),
             // mark slots as dead and return none
             Err(_) => {
-                unsafe {
-                    self.mark_dead(PointRange {
+                let handle = unsafe {
+                    self.metadata.alloc(PointRange {
                         slot: range.slot,
                         data: Range::EMPTY,
-                    });
+                    })
+                };
+                unsafe {
+                    self.mark_dead(
+                        PointRange {
+                            slot: range.slot,
+                            data: Range::EMPTY,
+                        },
+                        handle,
+                    );
                 }
 
                 None
@@ -238,9 +261,12 @@ impl<T: Message> Buffer<T> {
     /// # Safety
     ///
     /// Caller has to guarantie that they have control over the range.
-    pub unsafe fn mark_dead(&self, range: PointRange) {
+    pub unsafe fn mark_dead(&self, range: PointRange, handle: T::Handle) {
         unsafe {
-            if let Some(free) = self.data.mark_dead(self.allocated_range(), range) {
+            if let Some(free) = self
+                .metadata
+                .mark_dead(self.allocated_range(), range, handle)
+            {
                 self.dealloc(free);
             }
         };
@@ -253,19 +279,19 @@ impl<T: Message> Buffer<T> {
     /// - has control over the slots they are deallocating
     /// - has control over the data they are deallocating
     pub unsafe fn dealloc(&self, free: PointRange) {
-        let free = unsafe { self.data.dealloc(free) };
+        let free = unsafe { self.metadata.dealloc(free) };
         self.slot_free.store(free.slot, Ordering::Release);
         self.data_free.store(free.data, Ordering::Release);
     }
 }
 
-impl<T: Message> Drop for Buffer<T> {
+impl<T: Metadata> Drop for Buffer<T> {
     fn drop(&mut self) {
         let ptr = self.buf as *mut u8;
         let len = self.buf.len();
 
         unsafe {
-            std::alloc::dealloc(ptr, Layout::array::<T::Item>(len).unwrap());
+            std::alloc::dealloc(ptr, Layout::array::<T::Data>(len).unwrap());
         }
     }
 }

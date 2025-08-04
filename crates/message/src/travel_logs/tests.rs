@@ -1,4 +1,4 @@
-use crate::travel_logs::{Buffer, Handle, Message, Point, PointRange, Range};
+use crate::travel_logs::{Buffer, Handle, Metadata, Point, PointRange, Range};
 use bitvec::{array::BitArray, slice::BitSlice};
 use std::{
     sync::{Arc, atomic::AtomicU8},
@@ -9,6 +9,7 @@ use std::{
 #[derive(Debug)]
 struct Bytes {
     slots: BitArray<[AtomicU8; 1]>,
+    data_cap: usize,
 }
 
 fn find_alive_mark_dead(
@@ -30,13 +31,25 @@ fn find_alive_mark_dead(
     }
 }
 
-unsafe impl Message for Bytes {
-    const MAX_SLOTS: usize = 8;
-    type Item = u8;
+unsafe impl Metadata for Bytes {
+    type Handle = ();
+    type Data = u8;
+
+    fn capacity(&self) -> Point {
+        Point {
+            slot: 8,
+            data: self.data_cap,
+        }
+    }
 
     unsafe fn alloc(&self, _new: PointRange) {}
 
-    unsafe fn mark_dead(&self, allocated: PointRange, dead: PointRange) -> Option<PointRange> {
+    unsafe fn mark_dead(
+        &self,
+        allocated: PointRange,
+        dead: PointRange,
+        (): Self::Handle,
+    ) -> Option<PointRange> {
         if allocated.slot.from == dead.slot.from {
             let slice = self.slots.as_bitslice();
 
@@ -44,7 +57,7 @@ unsafe impl Message for Bytes {
                 from: dead.slot.upto,
                 upto: allocated.slot.upto,
             }
-            .into_ring_bounds(Self::MAX_SLOTS);
+            .into_ring_bounds(self.capacity().slot);
 
             if let Some(idx) = find_alive_mark_dead(slice, ranges.0) {
                 Some(PointRange {
@@ -82,9 +95,10 @@ unsafe impl Message for Bytes {
 }
 
 impl Bytes {
-    pub fn new() -> Self {
+    pub fn new(data_cap: usize) -> Self {
         Self {
             slots: BitArray::new([AtomicU8::new(0xFF)]),
+            data_cap,
         }
     }
 }
@@ -114,17 +128,12 @@ fn select_contiguos_range(
 
 impl Buffer<Bytes> {
     fn alloc_n(&self, bytes: usize) -> Option<Handle<'_, Bytes>> {
+        let cap = self.metadata.capacity();
         loop {
             let PointRange { slot, data } = self.allocated_range();
-            let slot = select_contiguos_range(
-                slot.invert(self.buf.len())
-                    .into_ring_bounds(Bytes::MAX_SLOTS),
-                1,
-            )?;
-            let data = select_contiguos_range(
-                data.invert(self.buf.len()).into_ring_bounds(self.buf.len()),
-                bytes,
-            )?;
+            let slot = select_contiguos_range(slot.invert(cap.slot).into_ring_bounds(cap.slot), 1)?;
+            let data =
+                select_contiguos_range(data.invert(cap.data).into_ring_bounds(cap.data), bytes)?;
 
             match unsafe { self.allocate(PointRange { slot, data }) } {
                 None => continue,
@@ -145,11 +154,11 @@ fn byte_set<const LEN: usize, T>(slice: *mut [T], vals: [T; LEN]) {
     }
 }
 
-fn write_slice<const LEN: usize, T: Message>(
+fn write_slice<const LEN: usize, T: Metadata>(
     buf: &Buffer<T>,
     idx: usize,
-    init: [T::Item; LEN],
-) -> &[T::Item] {
+    init: [T::Data; LEN],
+) -> &[T::Data] {
     let slice = raw_sub_slice(buf.buf, idx, LEN);
     byte_set(slice, init);
     unsafe { &*slice }
@@ -157,7 +166,7 @@ fn write_slice<const LEN: usize, T: Message>(
 
 #[test]
 fn basic_test() {
-    let buf = Buffer::new(Bytes::new(), 3 + 7 + 5 + 1);
+    let buf = Buffer::new(Bytes::new(3 + 7 + 5 + 1));
     let buf = &buf;
     assert_eq!(
         PointRange {
@@ -201,7 +210,7 @@ fn basic_test() {
     assert_eq!([b'b'; 7], b_slice);
     assert_eq!([b'c'; 5], c_slice);
 
-    drop(a);
+    a.dealloc();
     assert_eq!(
         PointRange {
             slot: Range { from: 1, upto: 3 },
@@ -209,7 +218,7 @@ fn basic_test() {
         },
         buf.allocated_range()
     );
-    drop(b);
+    b.dealloc();
     assert_eq!(
         PointRange {
             slot: Range { from: 2, upto: 3 },
@@ -217,7 +226,7 @@ fn basic_test() {
         },
         buf.allocated_range(),
     );
-    drop(c);
+    c.dealloc();
     assert_eq!(
         PointRange {
             slot: Range { from: 3, upto: 3 },
@@ -229,14 +238,14 @@ fn basic_test() {
 
 #[test]
 fn out_of_order() {
-    let buf = Arc::new(Buffer::new(Bytes::new(), 3 + 7 + 5 + 1));
+    let buf = Arc::new(Buffer::new(Bytes::new(3 + 7 + 5 + 1)));
 
     let a = std::thread::spawn({
         let buf = buf.clone();
         move || {
             let a = buf.alloc_n(3).unwrap();
             sleep(Duration::from_secs(1));
-            drop(a);
+            a.dealloc();
         }
     });
     let b = std::thread::spawn({
@@ -244,15 +253,15 @@ fn out_of_order() {
         move || {
             let b = buf.alloc_n(7).unwrap();
             sleep(Duration::from_secs(1));
-            drop(b);
+            b.dealloc();
         }
     });
     let c = std::thread::spawn({
-        let buf = buf.clone();
+        let _buf = buf.clone();
         move || {
             let c = buf.alloc_n(5).unwrap();
             sleep(Duration::from_secs(1));
-            drop(c);
+            c.dealloc();
         }
     });
 
