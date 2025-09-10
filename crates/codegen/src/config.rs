@@ -9,7 +9,7 @@ use std::{
 };
 use syn::{LitStr, parse::Parse};
 use verbs::Verb;
-use wayland_scanner_lib::{parse, protocol::Protocol};
+use wayland_scanner_lib::protocol::Protocol;
 
 pub enum GenerateConfig {
     Include { path: PathBuf, token: LitStr },
@@ -116,10 +116,10 @@ impl ToTokens for GenerateConfig {
     }
 }
 
-fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result<Protocol> {
+pub(crate) fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result<Protocol> {
     let path = relative_path(workspace, xml.value());
 
-    parse::try_parse(
+    wayland_scanner_lib::parse::try_parse(
         read_to_string(&path)
             .map_err(|err| {
                 syn::Error::new(
@@ -143,7 +143,7 @@ fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result<Protocol> 
     })
 }
 
-fn write_tokens_to_file(
+pub(crate) fn write_tokens_to_file(
     protocol: Protocol,
     base_dir: impl AsRef<Path>,
     out: &LitStr,

@@ -1,6 +1,6 @@
 use std::{
     alloc::Layout,
-    cmp, mem,
+    cmp,
     os::fd::RawFd,
     ptr,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -31,6 +31,7 @@ impl MessageQueue {
     fn new(msgs: usize, data: usize, fds: usize) -> Self {
         use std::alloc;
 
+        #[allow(unused)]
         unsafe {
             let buf: *mut Message =
                 alloc::alloc(Layout::array::<Message>(msgs).expect("invalid amount of messages"))
@@ -334,7 +335,6 @@ impl<T> Subqueue<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn simple_alloc_dealloc() {}
