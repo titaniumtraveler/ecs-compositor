@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::generate::generate_protocol;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};

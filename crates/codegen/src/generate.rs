@@ -18,7 +18,7 @@ pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
     let name = mod_name(name);
     let interfaces = interfaces.iter().map(generate_interface);
     quote! {
-        #[allow(unused_variables,unused_mut,unused_imports)]
+        #[allow(unused_variables,unused_mut,unused_imports, dead_code)]
         #[allow(clippy::doc_lazy_continuation,clippy::identity_op)]
         pub mod #name {
             #docs
