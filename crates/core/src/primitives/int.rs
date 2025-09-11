@@ -5,9 +5,11 @@ use crate::{
 use std::os::unix::prelude::RawFd;
 
 /// The value is the 32-bit value of the signed int.
+#[derive(Debug)]
 pub struct Int(pub i32);
 
 /// The value is the 32-bit value of the unsigned int.
+#[derive(Debug)]
 pub struct UInt(pub u32);
 
 impl<'data> Primitive<'data> for Int {

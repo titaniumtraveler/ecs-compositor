@@ -11,6 +11,7 @@ use std::{
 
 /// Starts with 32-bit array size in bytes, followed by the array contents verbatim, and finally
 /// padding to a 32-bit boundary.
+#[derive(Debug)]
 pub struct Array<'a> {
     /// If this is set to [`None`], this implies that the data has already been written to the
     /// buffer, which means only the header has to be set.

@@ -1,6 +1,6 @@
 use crate::wl_display::{self, WlDisplay};
 use std::{
-    ops::Add,
+    ops::Sub,
     os::fd::RawFd,
     ptr::{self, NonNull, slice_from_raw_parts_mut},
 };
@@ -105,7 +105,7 @@ impl<T> ThickPtr<T> {
     pub unsafe fn advance(&mut self, count: usize) {
         unsafe {
             self.ptr = self.ptr.add(count);
-            self.len = self.len.add(count);
+            self.len = self.len.sub(count);
         }
     }
 }

@@ -1,0 +1,20 @@
+[package]
+name = "wayland-raw"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+default-run = "wayland-raw"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+ecs-compositor-codegen.workspace = true
+
+[dependencies]
+bstr = "1.12.0"
+ecs-compositor-core.workspace = true
+libc = "0.2.175"
