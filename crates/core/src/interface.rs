@@ -12,5 +12,5 @@ impl Interface for () {
     const NAME: &str = "";
     const VERSION: u32 = 0;
 
-    type Error = u32;
+    type Error = UInt;
 }

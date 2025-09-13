@@ -1,6 +1,6 @@
 use crate::{
     RawSliceExt,
-    primitives::{Primitive, Result},
+    primitives::{Value, Result},
     wl_display,
 };
 use std::os::unix::prelude::RawFd;
@@ -13,7 +13,7 @@ pub struct Int(pub i32);
 #[derive(Debug)]
 pub struct UInt(pub u32);
 
-impl<'data> Primitive<'data> for Int {
+impl<'data> Value<'data> for Int {
     fn len(&self) -> u32 {
         4
     }
@@ -40,7 +40,7 @@ impl<'data> Primitive<'data> for Int {
     }
 }
 
-impl<'data> Primitive<'data> for UInt {
+impl<'data> Value<'data> for UInt {
     fn len(&self) -> u32 {
         4
     }

@@ -1,6 +1,6 @@
 use crate::{
     RawSliceExt,
-    primitives::{Primitive, Result},
+    primitives::{Value, Result},
     wl_display,
 };
 use std::os::unix::prelude::RawFd;
@@ -37,7 +37,7 @@ impl Fixed {
     }
 }
 
-impl Primitive<'_> for Fixed {
+impl Value<'_> for Fixed {
     fn len(&self) -> u32 {
         4
     }

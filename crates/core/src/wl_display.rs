@@ -1,10 +1,10 @@
-//! Stripped down impl of [`WlDisplay`]
+//! Stripped down impl of [`WlDisplay`] for error reporting
 
 use crate::{
-    Interface,
+    Interface, UInt, Value,
     primitives::{self, Enum, Object},
 };
-use std::num::NonZero;
+use std::{num::NonZero, os::unix::prelude::RawFd};
 
 pub enum WlDisplay {}
 
@@ -56,5 +56,22 @@ impl Enum for Error {
 
     fn to_u32(&self) -> u32 {
         *self as u32
+    }
+}
+
+impl<'data> Value<'data> for Error {
+    fn len(&self) -> u32 {
+        UInt(self.to_u32()).len()
+    }
+
+    unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> primitives::Result<Self> {
+        unsafe {
+            Self::from_u32(UInt::read(data, fds)?.0)
+                .ok_or(Error::Implementation.msg("invalid u32 value for `wl_display::error`"))
+        }
+    }
+
+    unsafe fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> primitives::Result<()> {
+        unsafe { UInt(self.to_u32()).write(data, fds) }
     }
 }

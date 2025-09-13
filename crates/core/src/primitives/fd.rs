@@ -1,6 +1,6 @@
 use crate::{
     RawSliceExt,
-    primitives::{Primitive, Result},
+    primitives::{Value, Result},
     wl_display,
 };
 use std::os::fd::RawFd;
@@ -9,7 +9,7 @@ use std::os::fd::RawFd;
 /// domain socket message (msg_control).
 pub struct Fd(pub RawFd);
 
-impl Primitive<'_> for Fd {
+impl Value<'_> for Fd {
     fn len(&self) -> u32 {
         0
     }

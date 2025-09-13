@@ -1,6 +1,6 @@
 use crate::{
     Error, Interface, RawSliceExt, String, UInt,
-    primitives::{Primitive, Result},
+    primitives::{Value, Result},
     wl_display,
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
@@ -43,7 +43,7 @@ impl<I: Interface> Object<I> {
     }
 }
 
-impl<I: Interface> Primitive<'_> for Object<I> {
+impl<I: Interface> Value<'_> for Object<I> {
     fn len(&self) -> u32 {
         4
     }
@@ -64,7 +64,7 @@ impl<I: Interface> Primitive<'_> for Object<I> {
     }
 }
 
-impl<I: Interface> Primitive<'_> for Option<Object<I>> {
+impl<I: Interface> Value<'_> for Option<Object<I>> {
     fn len(&self) -> u32 {
         4
     }
@@ -124,7 +124,7 @@ impl<I: Interface> NewId<I> {
     }
 }
 
-impl<I: Interface> Primitive<'_> for NewId<I> {
+impl<I: Interface> Value<'_> for NewId<I> {
     fn len(&self) -> u32 {
         4
     }
@@ -152,7 +152,7 @@ pub struct NewIdDyn<'data> {
     pub id: NewId,
 }
 
-impl<'data> Primitive<'data> for NewIdDyn<'data> {
+impl<'data> Value<'data> for NewIdDyn<'data> {
     fn len(&self) -> u32 {
         self.name.len() + self.version.len() + self.id.len()
     }

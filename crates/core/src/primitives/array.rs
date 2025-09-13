@@ -1,6 +1,6 @@
 use crate::{
     RawSliceExt,
-    primitives::{Primitive, Result, align},
+    primitives::{Result, Value, align},
     wl_display::{self, Error},
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonNull};
@@ -18,7 +18,7 @@ pub struct Array<'a> {
     _marker: PhantomData<&'a [u8]>,
 }
 
-impl<'data> Primitive<'data> for Array<'data> {
+impl<'data> Value<'data> for Array<'data> {
     #[inline]
     fn len(&self) -> u32 {
         4 + align::<4>(self.len)
@@ -52,7 +52,7 @@ pub struct String<'a> {
     _marker: PhantomData<&'a [u8]>,
 }
 
-impl<'data> Primitive<'data> for String<'data> {
+impl<'data> Value<'data> for String<'data> {
     #[inline]
     fn len(&self) -> u32 {
         4 + align::<4>(self.len.get())
@@ -76,7 +76,7 @@ impl<'data> Primitive<'data> for String<'data> {
     }
 }
 
-impl<'data> Primitive<'data> for Option<String<'data>> {
+impl<'data> Value<'data> for Option<String<'data>> {
     #[inline]
     fn len(&self) -> u32 {
         4 + self.as_ref().map(String::len).unwrap_or(0)
@@ -105,8 +105,9 @@ impl<'data> Primitive<'data> for Option<String<'data>> {
     }
 }
 
+#[allow(clippy::manual_inspect)]
 #[inline]
-pub unsafe fn read<'data>(data: &mut *const [u8]) -> Result<(NonNull<u8>, u32)> {
+pub unsafe fn read(data: &mut *const [u8]) -> Result<(NonNull<u8>, u32)> {
     let old = *data;
     (|| unsafe {
         let len = {

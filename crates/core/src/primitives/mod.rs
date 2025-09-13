@@ -18,7 +18,7 @@ pub use self::{
 };
 
 #[allow(clippy::len_without_is_empty)] // We are not a collection
-pub trait Primitive<'data>: Sized {
+pub trait Value<'data>: Sized {
     fn len(&self) -> u32;
 
     /// # Safety
@@ -60,7 +60,7 @@ pub struct Error {
 
 impl From<Error> for crate::Error {
     fn from(value: Error) -> Self {
-        WlDisplay::OBJECT.err(value.err as u32, value.msg)
+        WlDisplay::OBJECT.err(UInt(value.err.to_u32()), value.msg)
     }
 }
 
