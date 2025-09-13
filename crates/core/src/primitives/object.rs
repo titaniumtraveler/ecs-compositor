@@ -1,6 +1,6 @@
 use crate::{
-    Error, Interface, String, UInt,
-    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
+    Error, Interface, RawSliceExt, String, UInt,
+    primitives::{Primitive, Result},
     wl_display,
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
@@ -48,8 +48,8 @@ impl<I: Interface> Primitive<'_> for Object<I> {
         4
     }
 
-    fn read(data: &mut &[u8], _: &mut &[RawFd]) -> Result<Self> {
-        let id = read_id(data)?
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        let id = unsafe { read_id(data)? }
             .ok_or(wl_display::Error::InvalidMethod.msg("null object not allowed here"))?;
 
         Ok(Self {
@@ -58,10 +58,8 @@ impl<I: Interface> Primitive<'_> for Object<I> {
         })
     }
 
-    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
-        unsafe {
-            data.write_4_bytes(self.id.get().to_ne_bytes());
-        }
+    unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
+        unsafe { write_id(data, self.id.get())? }
         Ok(())
     }
 }
@@ -71,8 +69,8 @@ impl<I: Interface> Primitive<'_> for Option<Object<I>> {
         4
     }
 
-    fn read(data: &mut &[u8], _: &mut &[RawFd]) -> Result<Self> {
-        match read_id(data)? {
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        match unsafe { read_id(data)? } {
             None => Ok(None),
             Some(id) => Ok(Some(Object {
                 id,
@@ -81,10 +79,12 @@ impl<I: Interface> Primitive<'_> for Option<Object<I>> {
         }
     }
 
-    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
-        let id = self.as_ref().map(|object| object.id.get()).unwrap_or(0);
+    unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
-            data.write_4_bytes(id.to_ne_bytes());
+            write_id(
+                data,
+                self.as_ref().map(|object| object.id.get()).unwrap_or(0),
+            )?;
         }
         Ok(())
     }
@@ -129,20 +129,19 @@ impl<I: Interface> Primitive<'_> for NewId<I> {
         4
     }
 
-    fn read(data: &mut &'_ [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let id = read_id(data)?
-            .ok_or(wl_display::Error::InvalidMethod.msg("new_id is not allowed to be 0"))?;
-
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         Ok(NewId {
-            id,
+            id: unsafe {
+                read_id(data)?.ok_or(
+                    wl_display::Error::Implementation.msg("id with value 0 is not allowed here"),
+                )?
+            },
             _marker: PhantomData,
         })
     }
 
-    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
-        unsafe {
-            data.write_4_bytes(self.id.get().to_ne_bytes());
-        }
+    unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
+        unsafe { write_id(data, self.id.get())? }
         Ok(())
     }
 }
@@ -158,25 +157,43 @@ impl<'data> Primitive<'data> for NewIdDyn<'data> {
         self.name.len() + self.version.len() + self.id.len()
     }
 
-    fn read(data: &mut &'data [u8], fds: &mut &[RawFd]) -> Result<Self> {
-        Ok(Self {
-            name: String::read(data, fds)?,
-            version: UInt::read(data, fds)?,
-            id: NewId::read(data, fds)?,
-        })
+    unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> Result<Self> {
+        unsafe {
+            Ok(Self {
+                name: String::read(data, fds)?,
+                version: UInt::read(data, fds)?,
+                id: NewId::read(data, fds)?,
+            })
+        }
     }
 
-    fn write(&self, data: &mut ThickPtr<u8>, fds: &mut ThickPtr<RawFd>) -> Result<()> {
-        self.name.write(data, fds)?;
-        self.version.write(data, fds)?;
-        self.id.write(data, fds)?;
+    unsafe fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> Result<()> {
+        unsafe {
+            self.name.write(data, fds)?;
+            self.version.write(data, fds)?;
+            self.id.write(data, fds)?;
+        }
         Ok(())
     }
 }
 
-fn read_id(data: &mut &[u8]) -> Result<Option<NonZero<u32>>> {
-    let bytes = read_4_bytes(data)
-        .ok_or(wl_display::Error::InvalidMethod.msg("failed to read object id"))?;
+unsafe fn read_id(data: &mut *const [u8]) -> Result<Option<NonZero<u32>>> {
+    let u32 = unsafe {
+        data.split_at(4)
+            .ok_or(wl_display::Error::InvalidMethod.msg("failed to read object id"))?
+            .cast::<u32>()
+            .read()
+    };
 
-    Ok(NonZero::new(u32::from_ne_bytes(bytes)))
+    Ok(NonZero::new(u32))
+}
+
+unsafe fn write_id(data: &mut *mut [u8], id: u32) -> Result<()> {
+    unsafe {
+        data.split_at(4)
+            .ok_or(wl_display::Error::Implementation.msg("not enough write buffer space"))?
+            .cast::<u32>()
+            .write(id);
+    }
+    Ok(())
 }

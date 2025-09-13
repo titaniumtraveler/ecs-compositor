@@ -1,17 +1,19 @@
-use std::os::fd::RawFd;
-
 pub use self::{
     error::*,
     interface::Interface,
     primitives::Primitive,
-    primitives::{Array, Enum, Fd, Fixed, Int, NewId, NewIdDyn, Object, String, ThickPtr, UInt},
+    primitives::{Array, Enum, Fd, Fixed, Int, NewId, NewIdDyn, Object, String, UInt},
+    raw_slice::RawSliceExt,
 };
+use std::os::fd::RawFd;
 
 pub mod error;
 pub mod interface;
 pub mod primitives;
+mod raw_slice;
 pub mod wl_display;
 
+#[allow(clippy::len_without_is_empty)] // Again clippy! We are not a collection!
 pub trait Message<'data, const FDS: usize, I: Interface>: Sized {
     /// Number of FD args of this message.
     ///
@@ -20,11 +22,11 @@ pub trait Message<'data, const FDS: usize, I: Interface>: Sized {
     /// constants in slice types in trait *implementations*, but not in trait *definitions*.
     const FDS: usize = FDS;
 
+    fn len(&self) -> u32;
+
     /// Reads message from queue.
     fn read(data: &'data [u8], fds: &[RawFd; FDS]) -> primitives::Result<Self>;
-    fn write_len(&self) -> u32;
-
     /// Writes the message to queue
     /// `data.len()` is guarantied by the caller to be the same size the return value of [`Self::write_len()`]
-    fn write(&self, data: &mut ThickPtr<u8>, fds: &mut ThickPtr<RawFd>) -> primitives::Result<()>;
+    fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> primitives::Result<()>;
 }

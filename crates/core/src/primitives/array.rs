@@ -1,13 +1,9 @@
 use crate::{
-    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
-    wl_display,
+    RawSliceExt,
+    primitives::{Primitive, Result, align},
+    wl_display::{self, Error},
 };
-use std::{
-    marker::PhantomData,
-    num::NonZero,
-    os::unix::prelude::RawFd,
-    ptr::{self, NonNull},
-};
+use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonNull};
 
 /// Starts with 32-bit array size in bytes, followed by the array contents verbatim, and finally
 /// padding to a 32-bit boundary.
@@ -25,31 +21,31 @@ pub struct Array<'a> {
 impl<'data> Primitive<'data> for Array<'data> {
     #[inline]
     fn len(&self) -> u32 {
-        4 + pad_to_4(self.len)
+        4 + align::<4>(self.len)
     }
 
     #[inline]
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let (ptr, len) =
-            read_data(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read array"))?;
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        unsafe {
+            let (ptr, len) = read(data)?;
 
-        Ok(Self {
-            ptr: NonNull::new(ptr.as_ptr() as *mut _),
-            len,
-            _marker: PhantomData,
-        })
+            Ok(Self {
+                ptr: Some(ptr),
+                len,
+                _marker: PhantomData,
+            })
+        }
     }
 
     #[inline]
-    fn write(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
-        write_data(self.ptr, self.len, data);
-        Ok(())
+    unsafe fn write(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
+        unsafe { write(data, self.ptr, self.len) }
     }
 }
 
 /// Starts with an unsigned 32-bit length (including null terminator), followed by the string
 /// contents, including terminating null byte, then padding to a 32-bit boundary. A null value is
-/// represented with a length of 0.
+/// represented with a length of 0. (In Rust as `Option::<String>::None`)
 pub struct String<'a> {
     pub ptr: Option<NonNull<u8>>,
     pub len: NonZero<u32>,
@@ -59,29 +55,24 @@ pub struct String<'a> {
 impl<'data> Primitive<'data> for String<'data> {
     #[inline]
     fn len(&self) -> u32 {
-        let header = u32::BITS / 8;
-        header + pad_to_4(self.len.into())
+        4 + align::<4>(self.len.get())
     }
 
     #[inline]
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let (ptr, len) =
-            read_data(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read string"))?;
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        let (ptr, len) = unsafe { read(data) }?;
 
-        match NonZero::new(len) {
-            Some(len) => Ok(String {
-                ptr: NonNull::new(ptr.as_ptr() as *mut u8),
-                len,
-                _marker: PhantomData,
-            }),
-            None => Err(wl_display::Error::InvalidMethod.msg("empty string not allowed here")),
-        }
+        Ok(String {
+            ptr: Some(ptr),
+            len: NonZero::new(len)
+                .ok_or(wl_display::Error::InvalidMethod.msg("empty string not allowed here"))?,
+            _marker: PhantomData,
+        })
     }
 
     #[inline]
-    fn write(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
-        write_data(self.ptr, self.len.get(), data);
-        Ok(())
+    unsafe fn write(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
+        unsafe { write(data, self.ptr, self.len.get()) }
     }
 }
 
@@ -92,79 +83,93 @@ impl<'data> Primitive<'data> for Option<String<'data>> {
     }
 
     #[inline]
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let (ptr, len) =
-            read_data(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read string"))?;
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        let (ptr, len) = unsafe { read(data) }?;
 
-        match NonZero::new(len) {
-            None => Ok(None),
-            Some(len) => Ok(Some(String {
-                ptr: NonNull::new(ptr.as_ptr() as *mut u8),
-                len,
-                _marker: PhantomData,
-            })),
-        }
+        Ok(NonZero::new(len).map(|len| String {
+            ptr: Some(ptr),
+            len,
+            _marker: PhantomData,
+        }))
     }
 
     #[inline]
-    fn write(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
-        let (src, len) = match self {
-            Some(string) => (string.ptr, string.len.get()),
-            None => (None, 0),
+    unsafe fn write(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
+        unsafe {
+            write(
+                data,
+                self.as_ref().map(|str| str.ptr).unwrap_or(None),
+                self.as_ref().map(|str| str.len.get()).unwrap_or(0),
+            )
+        }
+    }
+}
+
+#[inline]
+pub unsafe fn read<'data>(data: &mut *const [u8]) -> Result<(NonNull<u8>, u32)> {
+    let old = *data;
+    (|| unsafe {
+        let len = {
+            let len = data
+                .split_at(4)
+                .ok_or_else(|| Error::Implementation.msg("reading buffer too short"))?
+                .cast::<u32>();
+            debug_assert!(len.is_aligned());
+            len.read()
         };
-        write_data(src, len, data);
-        Ok(())
-    }
+
+        let content = data.split_at(align::<4>(len) as usize).ok_or_else(|| {
+            Error::Implementation.msg("reading buffer too short for message content")
+        })?;
+
+        // Safety: `data` is guarantied by caller to point to a valid buffer.
+        Ok((NonNull::new_unchecked(content as *mut u8), len))
+    })()
+    .map_err(|err| {
+        *data = old;
+        err
+    })
 }
 
-const fn pad_to_4(x: u32) -> u32 {
-    const fn pad_to<const ALIGN: u32>(x: u32) -> u32 {
-        ((x + (ALIGN - 1)) & !(ALIGN - 1)) - x
-    }
-
-    pad_to::<4>(x)
-}
-
-#[allow(clippy::identity_op)]
-#[test]
-fn test_align_to_4() {
-    for i in 0..=16 {
-        assert_eq!(pad_to_4(i * 4 + 0), 0);
-        assert_eq!(pad_to_4(i * 4 + 1), 3);
-        assert_eq!(pad_to_4(i * 4 + 2), 2);
-        assert_eq!(pad_to_4(i * 4 + 3), 1);
-    }
-}
-
+/// Write [`String`]/[`Array`] data.
+///
+/// If there is not enough room on the buffer, throws an error.
+/// If `ptr` is `None`, only writes the header and assumes the user has already written the actual
+/// content (including the padding bytes to the 4 byte boundary).
+///
+/// # Safety
+///
+/// - `data` has to point to a valid buffer **and** has to be aligned to a 4 byte boundary.
+///   See [`crate::primitives::align()`] as an helper.
+/// - `ptr` if `Some(_)` has to be valid for `len` bytes.
 #[inline]
-fn read_data<'data>(data: &mut &'data [u8]) -> Option<(&'data [u8], u32)> {
-    let [a, b, c, d] = read_4_bytes(data)?;
-    let len = u32::from_ne_bytes([a, b, c, d]);
-
-    let (str, tail) = data.split_at_checked((len + pad_to_4(len)) as usize)?;
-    *data = tail;
-
-    Some((str, len))
-}
-
-#[inline]
-fn write_data(src: Option<NonNull<u8>>, len: u32, data: &mut ThickPtr<u8>) {
+pub unsafe fn write(data: &mut *mut [u8], ptr: Option<NonNull<u8>>, len: u32) -> Result<()> {
     unsafe {
-        // Write len header
-        data.write_slice(&len.to_ne_bytes());
+        // Check if the buffer has at least header + data space.
+        let padded_len = align::<4>(len);
+        if data.len() < 4 + padded_len as usize {
+            return Err(wl_display::Error::Implementation.msg("not enough buffer provided"));
+        }
 
-        let Some(src) = src else {
-            // The actual data was already written, so only write the header
-            data.advance((len + pad_to_4(len)) as usize);
+        let len_hdr = data.split_at_unchecked(4).cast::<u32>();
+        debug_assert!(len_hdr.is_aligned());
+        len_hdr.write(len);
 
-            return;
+        let (content, padding) = {
+            let mut content = data.split_at_unchecked(align::<4>(len) as usize);
+            (
+                content.split_at_unchecked(align::<4>(len) as usize),
+                content,
+            )
         };
+        if let Some(ptr) = ptr {
+            content
+                .cast::<u8>()
+                .copy_from_nonoverlapping(ptr.as_ptr(), len as usize);
 
-        // SAFETY: `self.ptr` + `self.len` are guarantied to point to valid data.
-        let src = &*ptr::slice_from_raw_parts(src.as_ptr(), len as usize);
-        data.write_slice(src);
+            padding.cast::<u8>().write_bytes(0, padding.len());
+        }
 
-        // Explicitly zero out the padding bytes.
-        data.write_zeros(pad_to_4(len) as usize);
+        Ok(())
     }
 }

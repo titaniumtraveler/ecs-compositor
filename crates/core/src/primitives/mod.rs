@@ -1,9 +1,5 @@
 use crate::wl_display::{self, WlDisplay};
-use std::{
-    ops::Sub,
-    os::fd::RawFd,
-    ptr::{self, NonNull, slice_from_raw_parts_mut},
-};
+use std::os::fd::RawFd;
 
 mod array;
 mod enum_;
@@ -25,13 +21,35 @@ pub use self::{
 pub trait Primitive<'data>: Sized {
     fn len(&self) -> u32;
 
-    /// Panicks if `fds` is empty when calling [`Fd::read()`].
-    /// (The number of fds that are needed are known when parsing the message, so no reason not to
-    /// keep this static.)
-    fn read(data: &mut &'data [u8], fds: &mut &[RawFd]) -> Result<Self>;
-    /// Write primitive to buffer. Panicks if `data` shorter than [`Self::len()`], or if `fds` is
-    /// empty when calling [`Fd::write()`].
-    fn write(&self, data: &mut ThickPtr<u8>, fds: &mut ThickPtr<RawFd>) -> Result<()>;
+    /// # Safety
+    ///
+    /// - `data` and `fds` have to point to a valid buffer to read from.
+    /// - `data` has to be aligned to a 4 byte boundary.
+    /// - All FDs in `fds` have to be valid.
+    ///
+    /// - Implementors should not assume that the buffer has enough space for `Self`!
+    ///   In case there is not enough space, an error should be thrown!
+    ///
+    ///   Note that parts of the value might still have been read from the buffer, which means the
+    ///   `data` and/or `fds` pointers were advanced forward!
+    ///   To prevent data confusions caused by that, either roll `data` and `fds` back on errors,
+    ///   or try to infer the message length from things like the length declared in the wayland
+    ///   header, or if possible the static length of the message!
+    unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> Result<Self>;
+
+    /// # Safety
+    ///
+    /// - `data` and `fds` have to point to a valid buffer to write to.
+    /// - `data` has to be aligned to a 4 byte boundary.
+    /// - All FDs in `fds` have to be valid.
+    ///
+    /// - Implementors should not assume that the buffer has enough space for `Self`!
+    ///   In case there is not enough space, an error should be thrown!
+    ///
+    ///   Note that parts of the value might still have been written to the buffer and therefore advanced it forward!
+    ///   Make sure to check [`Self::len()`], or if necessary rollback the `data` and `fds`
+    ///   pointers to before the attempted write to prevent partial writes to be actually sent!
+    unsafe fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> Result<()>;
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -46,104 +64,6 @@ impl From<Error> for crate::Error {
     }
 }
 
-/// # SAFETY
-///
-/// This type is inherently unsafe and should be used with care!
-pub struct ThickPtr<T> {
-    pub ptr: NonNull<T>,
-    pub len: usize,
-}
-
-impl<T> ThickPtr<T> {
-    /// # Safety
-    ///
-    /// 1. `self` has to point a valid empty allocation that is writable and has to be aligned to `T`.
-    /// 2. `src.len < self.len()` has to be true.
-    /// 3. `self` and `src` have to be non-overlapping. (This is implied by `1.`)
-    #[inline]
-    pub unsafe fn write_slice<'a>(&mut self, src: &[T]) -> &'a mut [T]
-    where
-        T: Copy,
-    {
-        debug_assert!(src.len() < self.len);
-
-        let dst = self.ptr;
-        let (src, len) = (src.as_ptr(), src.len());
-
-        // SAFETY:
-        // Behavior is undefined if any of the following conditions are violated:
-        //
-        // - `src` is a slice, so it is valid to read form for `len` items.
-        // - The caller guarantees that dst is valid for writing for `len` items.
-        // - The caller guaranties that src and dst are properly aligned.
-        // - The caller guaranties that src and dst are non-overlapping.
-        unsafe {
-            ptr::copy_nonoverlapping(src, dst.as_ptr(), len);
-        }
-
-        // SAFETY: Caller guaranties safety.
-        unsafe {
-            self.advance(len);
-        }
-
-        // SAFETY: Constructing this `slice` from `dst` and `len` is safe, because it points to
-        // valid and initialized data that we have mutable access to.
-        unsafe { &mut *slice_from_raw_parts_mut(dst.as_ptr(), len) }
-    }
-
-    /// # Safety
-    /// See [`Self::write_slice()`]
-    pub unsafe fn write(&mut self, val: T) {
-        unsafe {
-            self.ptr.write(val);
-            self.advance(1);
-        }
-    }
-
-    /// # SAFETY
-    /// See [`*mut T::add()`]
-    pub unsafe fn advance(&mut self, count: usize) {
-        unsafe {
-            self.ptr = self.ptr.add(count);
-            self.len = self.len.sub(count);
-        }
-    }
-}
-
-impl ThickPtr<u8> {
-    /// # Safety
-    /// See [`Self::write_slice()`]
-    #[inline]
-    pub unsafe fn write_4_bytes(&mut self, bytes: [u8; 4]) {
-        let bytes = &bytes;
-        let dst = self.ptr;
-
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), dst.as_ptr(), 4);
-        }
-
-        unsafe {
-            self.advance(4);
-        }
-    }
-
-    /// # Safety
-    /// See [`Self::write_slice()`]
-    pub unsafe fn write_zeros(&mut self, count: usize) {
-        unsafe {
-            ptr::write_bytes(self.ptr.as_ptr(), 0u8, count);
-            self.advance(count);
-        }
-    }
-}
-
-#[inline]
-pub(crate) fn read_4_bytes(data: &mut &[u8]) -> Option<[u8; 4]> {
-    match data[..] {
-        [a, b, c, d, ref tail @ ..] => {
-            *data = tail;
-            Some([a, b, c, d])
-        }
-        _ => None,
-    }
+pub const fn align<const ALIGN: u32>(len: u32) -> u32 {
+    (len + ALIGN - 1) & !(ALIGN - 1)
 }

@@ -1,5 +1,6 @@
 use crate::{
-    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
+    RawSliceExt,
+    primitives::{Primitive, Result},
     wl_display,
 };
 use std::os::unix::prelude::RawFd;
@@ -17,16 +18,23 @@ impl<'data> Primitive<'data> for Int {
         4
     }
 
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let bytes =
-            read_4_bytes(data).ok_or(wl_display::Error::InvalidMethod.msg("failed to read int"))?;
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        let i32 = unsafe {
+            data.split_at(4)
+                .ok_or(wl_display::Error::InvalidMethod.msg("failed to read int"))?
+                .cast::<i32>()
+                .read()
+        };
 
-        Ok(Self(i32::from_ne_bytes(bytes)))
+        Ok(Self(i32))
     }
 
-    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+    unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
-            data.write_4_bytes(self.0.to_ne_bytes());
+            data.split_at(4)
+                .ok_or(wl_display::Error::Implementation.msg("not enough write buffer for int"))?
+                .cast::<i32>()
+                .write(self.0);
         }
         Ok(())
     }
@@ -37,16 +45,23 @@ impl<'data> Primitive<'data> for UInt {
         4
     }
 
-    fn read(data: &mut &'data [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let bytes = read_4_bytes(data)
-            .ok_or(wl_display::Error::InvalidMethod.msg("failed to read uint"))?;
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        let u32 = unsafe {
+            data.split_at(4)
+                .ok_or(wl_display::Error::InvalidMethod.msg("failed to read int"))?
+                .cast::<u32>()
+                .read()
+        };
 
-        Ok(Self(u32::from_ne_bytes(bytes)))
+        Ok(Self(u32))
     }
 
-    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+    unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
-            data.write_4_bytes(self.0.to_ne_bytes());
+            data.split_at(4)
+                .ok_or(wl_display::Error::Implementation.msg("not enough write buffer for int"))?
+                .cast::<u32>()
+                .write(self.0);
         }
         Ok(())
     }

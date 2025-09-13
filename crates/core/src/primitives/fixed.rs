@@ -1,5 +1,6 @@
 use crate::{
-    primitives::{Primitive, Result, ThickPtr, read_4_bytes},
+    RawSliceExt,
+    primitives::{Primitive, Result},
     wl_display,
 };
 use std::os::unix::prelude::RawFd;
@@ -41,16 +42,23 @@ impl Primitive<'_> for Fixed {
         4
     }
 
-    fn read(data: &mut &'_ [u8], _: &mut &[RawFd]) -> Result<Self> {
-        let bytes = read_4_bytes(data)
-            .ok_or(wl_display::Error::InvalidMethod.msg("failed to read fixed-point"))?;
+    unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
+        let i32 = unsafe {
+            data.split_at(4)
+                .ok_or(wl_display::Error::InvalidMethod.msg("failed to read fixed-point"))?
+                .cast::<i32>()
+                .read()
+        };
 
-        Ok(Fixed(i32::from_ne_bytes(bytes)))
+        Ok(Fixed(i32))
     }
 
-    fn write<'a>(&self, data: &mut ThickPtr<u8>, _: &mut ThickPtr<RawFd>) -> Result<()> {
+    unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
-            data.write_4_bytes(self.0.to_ne_bytes());
+            data.split_at(4)
+                .ok_or(wl_display::Error::Implementation.msg("not enough buffer space"))?
+                .cast::<i32>()
+                .write(self.0);
         }
         Ok(())
     }
