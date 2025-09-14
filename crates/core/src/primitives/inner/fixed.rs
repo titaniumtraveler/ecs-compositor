@@ -1,6 +1,6 @@
 use crate::{
     RawSliceExt,
-    primitives::{Value, Result},
+    primitives::{Result, Value},
     wl_display,
 };
 use std::os::unix::prelude::RawFd;
@@ -45,7 +45,7 @@ impl Value<'_> for fixed {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let i32 = unsafe {
             data.split_at(4)
-                .ok_or(wl_display::Error::InvalidMethod.msg("failed to read fixed-point"))?
+                .ok_or(wl_display::Error::invalid_method.msg("failed to read fixed-point"))?
                 .cast::<i32>()
                 .read()
         };
@@ -56,7 +56,7 @@ impl Value<'_> for fixed {
     unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
             data.split_at(4)
-                .ok_or(wl_display::Error::Implementation.msg("not enough buffer space"))?
+                .ok_or(wl_display::Error::implementation.msg("not enough buffer space"))?
                 .cast::<i32>()
                 .write(self.0);
         }

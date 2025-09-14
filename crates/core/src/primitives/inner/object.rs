@@ -50,7 +50,7 @@ impl<I: Interface> Value<'_> for object<I> {
 
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let id = unsafe { read_id(data)? }
-            .ok_or(wl_display::Error::InvalidMethod.msg("null object not allowed here"))?;
+            .ok_or(wl_display::Error::invalid_method.msg("null object not allowed here"))?;
 
         Ok(Self {
             id,
@@ -133,7 +133,7 @@ impl<I: Interface> Value<'_> for new_id<I> {
         Ok(new_id {
             id: unsafe {
                 read_id(data)?.ok_or(
-                    wl_display::Error::Implementation.msg("id with value 0 is not allowed here"),
+                    wl_display::Error::implementation.msg("id with value 0 is not allowed here"),
                 )?
             },
             _marker: PhantomData,
@@ -180,7 +180,7 @@ impl<'data> Value<'data> for new_id_dyn<'data> {
 unsafe fn read_id(data: &mut *const [u8]) -> Result<Option<NonZero<u32>>> {
     let u32 = unsafe {
         data.split_at(4)
-            .ok_or(wl_display::Error::InvalidMethod.msg("failed to read object id"))?
+            .ok_or(wl_display::Error::invalid_method.msg("failed to read object id"))?
             .cast::<u32>()
             .read()
     };
@@ -191,7 +191,7 @@ unsafe fn read_id(data: &mut *const [u8]) -> Result<Option<NonZero<u32>>> {
 unsafe fn write_id(data: &mut *mut [u8], id: u32) -> Result<()> {
     unsafe {
         data.split_at(4)
-            .ok_or(wl_display::Error::Implementation.msg("not enough write buffer space"))?
+            .ok_or(wl_display::Error::implementation.msg("not enough write buffer space"))?
             .cast::<u32>()
             .write(id);
     }

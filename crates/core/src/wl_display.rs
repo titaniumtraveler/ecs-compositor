@@ -1,6 +1,6 @@
 //! Stripped down impl of [`WlDisplay`] for error reporting
 
-use crate::{Interface, Value, enumeration, object, primitives, uint, wl_display};
+use crate::{Interface, Value, enumeration, interface::Opcode, object, primitives, uint};
 use std::{num::NonZero, os::unix::prelude::RawFd};
 
 pub enum WlDisplay {}
@@ -14,7 +14,48 @@ impl Interface for WlDisplay {
     const NAME: &str = "wl_display";
     const VERSION: u32 = 1;
 
-    type Error = wl_display::Error;
+    type Error = Error;
+
+    type Request = Request;
+    type Event = Event;
+}
+
+pub enum Request {}
+impl Opcode for Request {
+    fn from_u16(i: u16) -> Result<Self, u16> {
+        Err(i)
+    }
+
+    fn to_u16(self) -> u16 {
+        unreachable!()
+    }
+
+    fn since_version(&self) -> u32 {
+        1
+    }
+}
+
+#[repr(u16)]
+#[allow(non_camel_case_types)]
+pub enum Event {
+    error = 0,
+}
+
+impl Opcode for Event {
+    fn from_u16(i: u16) -> Result<Self, u16> {
+        match i {
+            0 => Ok(Self::error),
+            err => Err(err),
+        }
+    }
+
+    fn to_u16(self) -> u16 {
+        self as _
+    }
+
+    fn since_version(&self) -> u32 {
+        1
+    }
 }
 
 /// global error values
@@ -23,15 +64,16 @@ impl Interface for WlDisplay {
 /// server request.
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
+#[allow(non_camel_case_types)]
 pub enum Error {
     ///server couldn't find object
-    InvalidObject = 0,
+    invalid_object = 0,
     ///method doesn't exist on the specified interface or malformed request
-    InvalidMethod = 1,
+    invalid_method = 1,
     ///server is out of memory
-    NoMemory = 2,
+    no_memory = 2,
     ///implementation error in compositor
-    Implementation = 3,
+    implementation = 3,
 }
 
 impl Error {
@@ -43,10 +85,10 @@ impl Error {
 impl enumeration for Error {
     fn from_u32(int: u32) -> Option<Self> {
         match int {
-            0 => Some(Self::InvalidObject),
-            1 => Some(Self::InvalidMethod),
-            2 => Some(Self::NoMemory),
-            3 => Some(Self::Implementation),
+            0 => Some(Self::invalid_object),
+            1 => Some(Self::invalid_method),
+            2 => Some(Self::no_memory),
+            3 => Some(Self::implementation),
             _ => None,
         }
     }
@@ -64,7 +106,7 @@ impl<'data> Value<'data> for Error {
     unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> primitives::Result<Self> {
         unsafe {
             Self::from_u32(uint::read(data, fds)?.0)
-                .ok_or(Error::Implementation.msg("invalid u32 value for `wl_display::error`"))
+                .ok_or(Error::implementation.msg("invalid u32 value for `wl_display::error`"))
         }
     }
 

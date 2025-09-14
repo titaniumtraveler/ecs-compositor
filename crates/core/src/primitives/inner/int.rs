@@ -1,6 +1,6 @@
 use crate::{
     RawSliceExt,
-    primitives::{Value, Result},
+    primitives::{Result, Value},
     wl_display,
 };
 use std::os::unix::prelude::RawFd;
@@ -21,7 +21,7 @@ impl<'data> Value<'data> for int {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let i32 = unsafe {
             data.split_at(4)
-                .ok_or(wl_display::Error::InvalidMethod.msg("failed to read int"))?
+                .ok_or(wl_display::Error::invalid_method.msg("failed to read int"))?
                 .cast::<i32>()
                 .read()
         };
@@ -32,7 +32,7 @@ impl<'data> Value<'data> for int {
     unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
             data.split_at(4)
-                .ok_or(wl_display::Error::Implementation.msg("not enough write buffer for int"))?
+                .ok_or(wl_display::Error::implementation.msg("not enough write buffer for int"))?
                 .cast::<i32>()
                 .write(self.0);
         }
@@ -48,7 +48,7 @@ impl<'data> Value<'data> for uint {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let u32 = unsafe {
             data.split_at(4)
-                .ok_or(wl_display::Error::InvalidMethod.msg("failed to read int"))?
+                .ok_or(wl_display::Error::invalid_method.msg("failed to read int"))?
                 .cast::<u32>()
                 .read()
         };
@@ -59,7 +59,7 @@ impl<'data> Value<'data> for uint {
     unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
             data.split_at(4)
-                .ok_or(wl_display::Error::Implementation.msg("not enough write buffer for int"))?
+                .ok_or(wl_display::Error::implementation.msg("not enough write buffer for int"))?
                 .cast::<u32>()
                 .write(self.0);
         }
