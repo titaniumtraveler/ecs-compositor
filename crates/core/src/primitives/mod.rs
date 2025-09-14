@@ -63,7 +63,7 @@ pub struct Error {
     pub msg: &'static str,
 }
 
-impl From<Error> for crate::Error {
+impl From<Error> for crate::wl_display::event::error {
     fn from(value: Error) -> Self {
         wl_display::OBJECT.err(uint(value.err.to_u32()), value.msg)
     }

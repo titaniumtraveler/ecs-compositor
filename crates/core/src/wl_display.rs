@@ -121,3 +121,85 @@ pub mod enumeration {
         }
     }
 }
+
+pub mod event {
+    use crate::{Interface, Message, Value, enumeration, object, string, uint};
+    use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonNull};
+
+    #[allow(non_camel_case_types)]
+    pub struct error<I: Interface = ()> {
+        pub object: object<I>,
+        pub err: uint,
+        pub msg: &'static str,
+    }
+
+    impl<I: Interface> error<I> {
+        pub fn new(object: object<I>, err: I::Error, msg: &'static str) -> Self {
+            Self {
+                object,
+                err: uint(err.to_u32()),
+                msg,
+            }
+        }
+
+        pub fn err(&self) -> Option<I::Error> {
+            <I::Error as enumeration>::from_u32(self.err.0)
+        }
+
+        pub fn cast<To: Interface>(self) -> error<To> {
+            let error { object, err, msg } = self;
+
+            error {
+                object: object.cast(),
+                err,
+                msg,
+            }
+        }
+    }
+
+    impl Message<'_> for error {
+        type Interface = super::wl_display;
+        const VERSION: u32 = 1;
+
+        type Opcode = super::Event;
+        const OPCODE: Self::Opcode = super::Event::error;
+
+        const FDS: usize = 0;
+    }
+
+    fn to_str(str: &str) -> Option<string<'_>> {
+        NonZero::new(str.len().try_into().unwrap()).map(|len| string {
+            ptr: NonNull::new(str.as_ptr() as *mut _),
+            len,
+            _marker: PhantomData,
+        })
+    }
+
+    impl Value<'_> for error {
+        fn len(&self) -> u32 {
+            self.object.len() + self.err.len() + to_str(self.msg).len()
+        }
+
+        unsafe fn read(
+            _data: &mut *const [u8],
+            _fds: &mut *const [RawFd],
+        ) -> crate::primitives::Result<Self> {
+            unimplemented!()
+        }
+
+        unsafe fn write(
+            &self,
+            data: &mut *mut [u8],
+            fds: &mut *mut [RawFd],
+        ) -> crate::primitives::Result<()> {
+            unsafe {
+                self.object.write(data, fds)?;
+                self.err.write(data, fds)?;
+                to_str(self.msg).write(data, fds)?;
+                Ok(())
+            }
+        }
+    }
+}
+
+pub mod request {}

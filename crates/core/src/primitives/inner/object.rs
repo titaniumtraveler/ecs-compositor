@@ -1,8 +1,8 @@
 use crate::{
-    Error, Interface, RawSliceExt,
+    Interface, RawSliceExt,
     primitives::{Result, Value},
     string, uint,
-    wl_display::enumeration::error,
+    wl_display::{self, enumeration::error},
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
 
@@ -39,8 +39,8 @@ impl<I: Interface> object<I> {
         self.id
     }
 
-    pub fn err(self, err: I::Error, msg: &'static str) -> Error<I> {
-        Error::new(self, err, msg)
+    pub fn err(self, err: I::Error, msg: &'static str) -> wl_display::event::error<I> {
+        wl_display::event::error::new(self, err, msg)
     }
 }
 
@@ -120,8 +120,8 @@ impl<I: Interface> new_id<I> {
         }
     }
 
-    pub fn err(self, err: I::Error, msg: &'static str) -> Error<I> {
-        Error::new(self.to_object(), err, msg)
+    pub fn err(self, err: I::Error, msg: &'static str) -> wl_display::event::error<I> {
+        wl_display::event::error::new(self.to_object(), err, msg)
     }
 }
 

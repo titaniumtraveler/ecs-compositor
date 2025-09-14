@@ -15,7 +15,7 @@ pub struct array<'a> {
     /// Note that this length isn't the size of the allocation, but the size if the *data*, which
     /// means after `ptr + len` there might be `0..=3` bytes of padding.
     pub len: u32,
-    _marker: PhantomData<&'a [u8]>,
+    pub _marker: PhantomData<&'a [u8]>,
 }
 
 impl<'data> Value<'data> for array<'data> {
@@ -49,7 +49,7 @@ impl<'data> Value<'data> for array<'data> {
 pub struct string<'a> {
     pub ptr: Option<NonNull<u8>>,
     pub len: NonZero<u32>,
-    _marker: PhantomData<&'a [u8]>,
+    pub _marker: PhantomData<&'a [u8]>,
 }
 
 impl<'data> Value<'data> for string<'data> {
