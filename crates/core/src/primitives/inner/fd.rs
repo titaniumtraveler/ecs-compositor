@@ -7,16 +7,16 @@ use std::os::fd::RawFd;
 
 /// The file descriptor is not stored in the message buffer, but in the ancillary data of the UNIX
 /// domain socket message (msg_control).
-pub struct Fd(pub RawFd);
+pub struct fd(pub RawFd);
 
-impl Value<'_> for Fd {
+impl Value<'_> for fd {
     fn len(&self) -> u32 {
         0
     }
 
     unsafe fn read(_: &mut *const [u8], fds: &mut *const [RawFd]) -> Result<Self> {
         unsafe {
-            Ok(Fd(fds
+            Ok(fd(fds
                 .split_at(1)
                 .ok_or(wl_display::Error::Implementation.msg("not enough fds in read buffer"))?
                 .cast::<RawFd>()

@@ -1,20 +1,25 @@
 use crate::wl_display::{self, WlDisplay};
 use std::os::fd::RawFd;
 
-mod array;
-mod enum_;
-mod fd;
-mod fixed;
-mod int;
-mod object;
+// Module to prevent name collisions with the contained types.
+mod inner {
+    #![allow(non_camel_case_types)]
 
-pub use self::{
-    array::{Array, String},
-    enum_::Enum,
-    fd::Fd,
-    fixed::Fixed,
-    int::{Int, UInt},
-    object::{NewId, NewIdDyn, Object},
+    pub(super) mod array;
+    pub(super) mod enumeration;
+    pub(super) mod fd;
+    pub(super) mod fixed;
+    pub(super) mod int;
+    pub(super) mod object;
+}
+
+pub use self::inner::{
+    array::{array, string},
+    enumeration::enumeration,
+    fd::fd,
+    fixed::fixed,
+    int::{int, uint},
+    object::{new_id, new_id_dyn, object},
 };
 
 #[allow(clippy::len_without_is_empty)] // We are not a collection
@@ -60,7 +65,7 @@ pub struct Error {
 
 impl From<Error> for crate::Error {
     fn from(value: Error) -> Self {
-        WlDisplay::OBJECT.err(UInt(value.err.to_u32()), value.msg)
+        WlDisplay::OBJECT.err(uint(value.err.to_u32()), value.msg)
     }
 }
 

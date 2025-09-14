@@ -8,7 +8,7 @@ use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonN
 /// Starts with 32-bit array size in bytes, followed by the array contents verbatim, and finally
 /// padding to a 32-bit boundary.
 #[derive(Debug)]
-pub struct Array<'a> {
+pub struct array<'a> {
     /// If this is set to [`None`], this implies that the data has already been written to the
     /// buffer, which means only the header has to be set.
     pub ptr: Option<NonNull<u8>>,
@@ -18,7 +18,7 @@ pub struct Array<'a> {
     _marker: PhantomData<&'a [u8]>,
 }
 
-impl<'data> Value<'data> for Array<'data> {
+impl<'data> Value<'data> for array<'data> {
     #[inline]
     fn len(&self) -> u32 {
         4 + align::<4>(self.len)
@@ -46,13 +46,13 @@ impl<'data> Value<'data> for Array<'data> {
 /// Starts with an unsigned 32-bit length (including null terminator), followed by the string
 /// contents, including terminating null byte, then padding to a 32-bit boundary. A null value is
 /// represented with a length of 0. (In Rust as `Option::<String>::None`)
-pub struct String<'a> {
+pub struct string<'a> {
     pub ptr: Option<NonNull<u8>>,
     pub len: NonZero<u32>,
     _marker: PhantomData<&'a [u8]>,
 }
 
-impl<'data> Value<'data> for String<'data> {
+impl<'data> Value<'data> for string<'data> {
     #[inline]
     fn len(&self) -> u32 {
         4 + align::<4>(self.len.get())
@@ -62,7 +62,7 @@ impl<'data> Value<'data> for String<'data> {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let (ptr, len) = unsafe { read(data) }?;
 
-        Ok(String {
+        Ok(string {
             ptr: Some(ptr),
             len: NonZero::new(len)
                 .ok_or(wl_display::Error::InvalidMethod.msg("empty string not allowed here"))?,
@@ -76,17 +76,17 @@ impl<'data> Value<'data> for String<'data> {
     }
 }
 
-impl<'data> Value<'data> for Option<String<'data>> {
+impl<'data> Value<'data> for Option<string<'data>> {
     #[inline]
     fn len(&self) -> u32 {
-        4 + self.as_ref().map(String::len).unwrap_or(0)
+        4 + self.as_ref().map(string::len).unwrap_or(0)
     }
 
     #[inline]
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let (ptr, len) = unsafe { read(data) }?;
 
-        Ok(NonZero::new(len).map(|len| String {
+        Ok(NonZero::new(len).map(|len| string {
             ptr: Some(ptr),
             len,
             _marker: PhantomData,

@@ -7,13 +7,13 @@ use std::os::unix::prelude::RawFd;
 
 /// The value is the 32-bit value of the signed int.
 #[derive(Debug)]
-pub struct Int(pub i32);
+pub struct int(pub i32);
 
 /// The value is the 32-bit value of the unsigned int.
 #[derive(Debug)]
-pub struct UInt(pub u32);
+pub struct uint(pub u32);
 
-impl<'data> Value<'data> for Int {
+impl<'data> Value<'data> for int {
     fn len(&self) -> u32 {
         4
     }
@@ -40,7 +40,7 @@ impl<'data> Value<'data> for Int {
     }
 }
 
-impl<'data> Value<'data> for UInt {
+impl<'data> Value<'data> for uint {
     fn len(&self) -> u32 {
         4
     }

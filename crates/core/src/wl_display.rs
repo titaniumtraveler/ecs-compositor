@@ -1,23 +1,20 @@
 //! Stripped down impl of [`WlDisplay`] for error reporting
 
-use crate::{
-    Interface, UInt, Value,
-    primitives::{self, Enum, Object},
-};
+use crate::{Interface, Value, enumeration, object, primitives, uint, wl_display};
 use std::{num::NonZero, os::unix::prelude::RawFd};
 
 pub enum WlDisplay {}
 
 impl WlDisplay {
     /// `wl_display` is **always** available at id 1
-    pub const OBJECT: Object = Object::from_id(NonZero::new(1).unwrap());
+    pub const OBJECT: object = object::from_id(NonZero::new(1).unwrap());
 }
 
 impl Interface for WlDisplay {
     const NAME: &str = "wl_display";
     const VERSION: u32 = 1;
 
-    type Error = Error;
+    type Error = wl_display::Error;
 }
 
 /// global error values
@@ -43,7 +40,7 @@ impl Error {
     }
 }
 
-impl Enum for Error {
+impl enumeration for Error {
     fn from_u32(int: u32) -> Option<Self> {
         match int {
             0 => Some(Self::InvalidObject),
@@ -61,17 +58,17 @@ impl Enum for Error {
 
 impl<'data> Value<'data> for Error {
     fn len(&self) -> u32 {
-        UInt(self.to_u32()).len()
+        uint(self.to_u32()).len()
     }
 
     unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> primitives::Result<Self> {
         unsafe {
-            Self::from_u32(UInt::read(data, fds)?.0)
+            Self::from_u32(uint::read(data, fds)?.0)
                 .ok_or(Error::Implementation.msg("invalid u32 value for `wl_display::error`"))
         }
     }
 
     unsafe fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> primitives::Result<()> {
-        unsafe { UInt(self.to_u32()).write(data, fds) }
+        unsafe { uint(self.to_u32()).write(data, fds) }
     }
 }

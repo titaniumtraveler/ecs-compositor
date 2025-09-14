@@ -1,7 +1,7 @@
 use crate::{
-    Error, Interface, RawSliceExt, String, UInt,
-    primitives::{Value, Result},
-    wl_display,
+    Error, Interface, RawSliceExt,
+    primitives::{Result, Value},
+    string, uint, wl_display,
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
 
@@ -12,12 +12,12 @@ use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
 /// (And makes sure to provide a niche using [`NonZero<u32>`] to make sure that doesn't have any
 /// runtime impact)
 #[derive(Debug, Clone, Copy)]
-pub struct Object<I: Interface = ()> {
+pub struct object<I: Interface = ()> {
     id: NonZero<u32>,
     _marker: PhantomData<I>,
 }
 
-impl<I: Interface> Object<I> {
+impl<I: Interface> object<I> {
     pub const fn from_id(id: NonZero<u32>) -> Self {
         Self {
             id,
@@ -25,10 +25,10 @@ impl<I: Interface> Object<I> {
         }
     }
 
-    pub const fn cast<To: Interface>(self) -> Object<To> {
-        let Object { id, _marker: _ } = self;
+    pub const fn cast<To: Interface>(self) -> object<To> {
+        let object { id, _marker: _ } = self;
 
-        Object {
+        object {
             id,
             _marker: PhantomData,
         }
@@ -43,7 +43,7 @@ impl<I: Interface> Object<I> {
     }
 }
 
-impl<I: Interface> Value<'_> for Object<I> {
+impl<I: Interface> Value<'_> for object<I> {
     fn len(&self) -> u32 {
         4
     }
@@ -64,7 +64,7 @@ impl<I: Interface> Value<'_> for Object<I> {
     }
 }
 
-impl<I: Interface> Value<'_> for Option<Object<I>> {
+impl<I: Interface> Value<'_> for Option<object<I>> {
     fn len(&self) -> u32 {
         4
     }
@@ -72,7 +72,7 @@ impl<I: Interface> Value<'_> for Option<Object<I>> {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         match unsafe { read_id(data)? } {
             None => Ok(None),
-            Some(id) => Ok(Some(Object {
+            Some(id) => Ok(Some(object {
                 id,
                 _marker: PhantomData,
             })),
@@ -93,16 +93,16 @@ impl<I: Interface> Value<'_> for Option<Object<I>> {
 /// The 32-bit object ID. Generally, the interface used for the new object is inferred from the
 /// xml, but in the case where it's not specified, a new_id is preceded by a string specifying the
 /// interface name, and a uint specifying the version.
-pub struct NewId<I: Interface = ()> {
+pub struct new_id<I: Interface = ()> {
     pub id: NonZero<u32>,
     pub _marker: PhantomData<I>,
 }
 
-impl<I: Interface> NewId<I> {
-    pub fn cast<To: Interface>(self) -> NewId<To> {
-        let NewId { id, _marker: _ } = self;
+impl<I: Interface> new_id<I> {
+    pub fn cast<To: Interface>(self) -> new_id<To> {
+        let new_id { id, _marker: _ } = self;
 
-        NewId {
+        new_id {
             id,
             _marker: PhantomData,
         }
@@ -112,8 +112,8 @@ impl<I: Interface> NewId<I> {
         self.id
     }
 
-    pub fn to_object(&self) -> Object<I> {
-        Object {
+    pub fn to_object(&self) -> object<I> {
+        object {
             id: self.id,
             _marker: self._marker,
         }
@@ -124,13 +124,13 @@ impl<I: Interface> NewId<I> {
     }
 }
 
-impl<I: Interface> Value<'_> for NewId<I> {
+impl<I: Interface> Value<'_> for new_id<I> {
     fn len(&self) -> u32 {
         4
     }
 
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
-        Ok(NewId {
+        Ok(new_id {
             id: unsafe {
                 read_id(data)?.ok_or(
                     wl_display::Error::Implementation.msg("id with value 0 is not allowed here"),
@@ -146,13 +146,13 @@ impl<I: Interface> Value<'_> for NewId<I> {
     }
 }
 
-pub struct NewIdDyn<'data> {
-    pub name: String<'data>,
-    pub version: UInt,
-    pub id: NewId,
+pub struct new_id_dyn<'data> {
+    pub name: string<'data>,
+    pub version: uint,
+    pub id: new_id,
 }
 
-impl<'data> Value<'data> for NewIdDyn<'data> {
+impl<'data> Value<'data> for new_id_dyn<'data> {
     fn len(&self) -> u32 {
         self.name.len() + self.version.len() + self.id.len()
     }
@@ -160,9 +160,9 @@ impl<'data> Value<'data> for NewIdDyn<'data> {
     unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> Result<Self> {
         unsafe {
             Ok(Self {
-                name: String::read(data, fds)?,
-                version: UInt::read(data, fds)?,
-                id: NewId::read(data, fds)?,
+                name: string::read(data, fds)?,
+                version: uint::read(data, fds)?,
+                id: new_id::read(data, fds)?,
             })
         }
     }

@@ -2,7 +2,7 @@ pub use self::{
     error::*,
     interface::Interface,
     primitives::Value,
-    primitives::{Array, Enum, Fd, Fixed, Int, NewId, NewIdDyn, Object, String, UInt},
+    primitives::{array, enumeration, fd, fixed, int, new_id, new_id_dyn, object, string, uint},
     raw_slice::RawSliceExt,
 };
 
@@ -12,7 +12,6 @@ pub mod primitives;
 mod raw_slice;
 pub mod wl_display;
 
-#[allow(clippy::len_without_is_empty)] // Again clippy! We are not a collection!
 pub trait Message<'data, const FDS: usize, I: Interface>: Value<'data> {
     /// Number of FD args of this message.
     ///

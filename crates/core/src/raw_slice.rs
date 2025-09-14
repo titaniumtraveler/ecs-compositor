@@ -1,6 +1,5 @@
 use std::ptr::{NonNull, slice_from_raw_parts, slice_from_raw_parts_mut};
 
-#[allow(clippy::len_without_is_empty)]
 pub trait RawSliceExt: Sized {
     /// helper function exclusively to be able to reuse `split_at()`
     fn len(&self) -> usize;
