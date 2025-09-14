@@ -1,13 +1,17 @@
-use crate::{Interface, Value, object, uint};
+use crate::{Interface, Opcode, Value, object, uint};
 use std::os::unix::prelude::RawFd;
 
-pub trait Message<'data, const FDS: usize, I: Interface>: Value<'data> {
+pub trait Message<'data>: Value<'data> {
     /// Number of FD args of this message.
     ///
     /// Note: When implementing [`Message`], **don't** set this value manually, but use the generic
     /// constant instead! The reason for this is a weird rust quirk that allows associated
     /// constants in slice types in trait *implementations*, but not in trait *definitions*.
-    const FDS: usize = FDS;
+    const FDS: usize;
+
+    type Interface: Interface;
+    type Opcode: Opcode;
+    const OPCODE: Self::Opcode;
 }
 
 #[allow(non_camel_case_types)]

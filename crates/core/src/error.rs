@@ -3,7 +3,7 @@ use crate::{
     primitives::{enumeration, object},
 };
 
-pub type Result<T, I> = std::result::Result<T, Error<I>>;
+pub type Result<T, I = ()> = std::result::Result<T, Error<I>>;
 
 pub struct Error<I: Interface = ()> {
     pub object: object<I>,

@@ -1,7 +1,7 @@
 use crate::{
     RawSliceExt,
     primitives::{Result, Value, align},
-    wl_display::{self, error},
+    wl_display::enumeration::error,
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonNull};
 
@@ -65,7 +65,7 @@ impl<'data> Value<'data> for string<'data> {
         Ok(string {
             ptr: Some(ptr),
             len: NonZero::new(len)
-                .ok_or(wl_display::error::invalid_method.msg("empty string not allowed here"))?,
+                .ok_or(error::invalid_method.msg("empty string not allowed here"))?,
             _marker: PhantomData,
         })
     }
@@ -149,7 +149,7 @@ pub unsafe fn write(data: &mut *mut [u8], ptr: Option<NonNull<u8>>, len: u32) ->
         // Check if the buffer has at least header + data space.
         let padded_len = align::<4>(len);
         if data.len() < 4 + padded_len as usize {
-            return Err(wl_display::error::implementation.msg("not enough buffer provided"));
+            return Err(error::implementation.msg("not enough buffer provided"));
         }
 
         let len_hdr = data.split_at_unchecked(4).cast::<u32>();

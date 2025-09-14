@@ -1,4 +1,4 @@
-use crate::wl_display::{self, WlDisplay};
+use crate::wl_display;
 use std::os::fd::RawFd;
 
 // Module to prevent name collisions with the contained types.
@@ -59,13 +59,13 @@ pub trait Value<'data>: Sized {
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub struct Error {
-    pub err: wl_display::error,
+    pub err: wl_display::enumeration::error,
     pub msg: &'static str,
 }
 
 impl From<Error> for crate::Error {
     fn from(value: Error) -> Self {
-        WlDisplay::OBJECT.err(uint(value.err.to_u32()), value.msg)
+        wl_display::OBJECT.err(uint(value.err.to_u32()), value.msg)
     }
 }
 

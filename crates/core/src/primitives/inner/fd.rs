@@ -1,7 +1,7 @@
 use crate::{
     RawSliceExt,
     primitives::{Result, Value},
-    wl_display,
+    wl_display::enumeration::error,
 };
 use std::os::fd::RawFd;
 
@@ -18,7 +18,7 @@ impl Value<'_> for fd {
         unsafe {
             Ok(fd(fds
                 .split_at(1)
-                .ok_or(wl_display::error::implementation.msg("not enough fds in read buffer"))?
+                .ok_or(error::implementation.msg("not enough fds in read buffer"))?
                 .cast::<RawFd>()
                 .read()))
         }
@@ -27,7 +27,7 @@ impl Value<'_> for fd {
     unsafe fn write(&self, _: &mut *mut [u8], fds: &mut *mut [RawFd]) -> Result<()> {
         unsafe {
             fds.split_at(1)
-                .ok_or(wl_display::error::implementation.msg("fds buffer has not enough space"))?
+                .ok_or(error::implementation.msg("fds buffer has not enough space"))?
                 .cast::<RawFd>()
                 .write(self.0);
         }
