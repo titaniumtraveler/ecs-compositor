@@ -18,8 +18,8 @@ pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
     let name = mod_name(name);
     let interfaces = interfaces.iter().map(generate_interface);
     quote! {
-        #[allow(unused_variables,unused_mut,unused_imports, dead_code)]
-        #[allow(clippy::doc_lazy_continuation,clippy::identity_op)]
+        #[allow(unused_variables,unused_mut,unused_imports, dead_code, non_camel_case_types, unused_unsafe)]
+        #[allow(clippy::doc_lazy_continuation,clippy::identity_op, clippy::match_single_binding)]
         pub mod #name {
             #docs
             #(#interfaces)*
@@ -39,9 +39,9 @@ fn generate_interface(interface: &Interface) -> TokenStream {
 
     let error = if let Some(error) = enums.iter().find(|e| e.name == "error") {
         let name = typ_name(&error.name);
-        quote! {enums::#name}
+        quote! {enumeration::#name}
     } else {
-        quote! {u32}
+        quote! {uint}
     };
 
     let typ_name = typ_name(name);
@@ -54,44 +54,54 @@ fn generate_interface(interface: &Interface) -> TokenStream {
 
         quote! {
             use {
-                super::super::interfaces::*,
+                super::super::{interfaces::*, proto::{self, *}},
                 std::os::fd::RawFd,
-                ecs_compositor_core::*,
             };
 
             pub enum #typ_name {}
-            impl Interface for #typ_name {
+            impl proto::Interface for #typ_name {
                 const NAME:   &str = #name;
                 const VERSION: u32 = #version;
 
-                type Error         = #error;
+                type Request = request::Opcodes;
+                type Event   = event::Opcodes;
+
+                type Error   = #error;
             }
         }
     };
 
     let requests = {
+        let opcodes = gen_message_opcodes(requests);
         let requests = requests.iter().map(|msg| generate_message(msg, &typ_name));
+
         quote! {
-            pub mod requests {
+            pub mod request {
                 use super::*;
+                #opcodes
+
                 #(#requests)*
             }
         }
     };
     let events = {
+        let opcodes = gen_message_opcodes(events);
         let events = events.iter().map(|msg| generate_message(msg, &typ_name));
+
         quote! {
-            pub mod events {
+            pub mod event {
                 use super::*;
+                #opcodes
+
                 #(#events)*
             }
         }
     };
-    let enums = {
+    let enumerations = {
         let enums = enums.iter().map(generate_enum);
         quote! {
-            pub mod enums {
-                use super::*;
+            pub mod enumeration {
+                use super::{*, proto::enumeration};
                 #(#enums)*
             }
         }
@@ -105,7 +115,41 @@ fn generate_interface(interface: &Interface) -> TokenStream {
 
             #requests
             #events
-            #enums
+            #enumerations
+        }
+    }
+}
+
+fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
+    let entry = messages.iter().enumerate().map(|(i, msg)| {
+        let name = self::typ_name(&msg.name);
+        let i = Literal::u16_unsuffixed(i.try_into().expect("requests overflowing u16"));
+        quote! { #name = #i, }
+    });
+
+    let from_u16 = messages.iter().enumerate().map(|(i, msg)| {
+        let name = self::typ_name(&msg.name);
+        let i = Literal::u16_unsuffixed(i.try_into().expect("requests overflowing u16"));
+        quote! { #i => Ok(Self::#name), }
+    });
+
+    quote! {
+        #[derive(Debug, Clone, Copy)]
+        pub enum Opcodes {
+            #(#entry)*
+        }
+
+        impl proto::Opcode for Opcodes {
+            fn from_u16(i: u16) -> std::result::Result<Self, u16> {
+                match i {
+                    #(#from_u16)*
+                    err => Err(err),
+                }
+            }
+
+            fn to_u16(self) -> u16 {
+                self as u16
+            }
         }
     }
 }
@@ -114,7 +158,7 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
     let Message {
         name,
         typ: _,
-        since: _,
+        since,
         description,
         args,
     } = message;
@@ -131,7 +175,6 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
 
     let item = {
         let docs = Docs::Local.description(description);
-
         let fields = args.iter().map(gen_field);
 
         quote! {
@@ -143,6 +186,8 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
     };
 
     let impl_message = {
+        let version = Literal::u32_unsuffixed(*since);
+
         let fd_count = Literal::usize_unsuffixed(
             args.iter()
                 .filter(|arg| matches!(arg.typ, Type::Fd))
@@ -152,20 +197,20 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
         let fields_read = args.iter().map(|arg| {
             let name = mod_name(&arg.name);
             let typ = match arg.typ {
-                Type::NewId if arg.interface.is_none() => quote! { NewIdDyn },
+                Type::NewId if arg.interface.is_none() => quote! { new_id_dyn },
 
-                Type::Int => quote! {    Int    },
-                Type::Uint => quote! {   UInt   },
-                Type::Fixed => quote! {  Fixed  },
-                Type::String => quote! { String },
-                Type::Object => quote! { Object },
-                Type::NewId => quote! {  NewId  },
-                Type::Array => quote! {  Array  },
-                Type::Fd => quote! {     Fd     },
+                Type::Int => quote! {    int    },
+                Type::Uint => quote! {   uint   },
+                Type::Fixed => quote! {  fixed  },
+                Type::String => quote! { string },
+                Type::Object => quote! { object },
+                Type::NewId => quote! {  new_id  },
+                Type::Array => quote! {  array  },
+                Type::Fd => quote! {     fd     },
                 Type::Destructor => unreachable!(),
             };
             quote! {
-                #name: #typ::read(&mut data, &mut fds)?,
+                #name: #typ::read(data, fds)?,
             }
         });
 
@@ -184,26 +229,43 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
         });
 
         quote! {
-            impl<'data> Message<'data,#fd_count,#iface_name> for #name #lifetime {
-                fn read(mut data: &'data [u8], fds: &[RawFd; #fd_count]) -> primitives::Result<Self> {
-                    let mut fds = fds.as_slice();
-                    Ok(Self {
-                        #(#fields_read)*
-                    })
+            impl<'data> Message<'data> for #name #lifetime {
+                type Interface = #iface_name;
+                const VERSION: u32 = #version;
+
+                type Opcode = Opcodes;
+                const OPCODE: Self::Opcode = Self::Opcode::#name;
+                const OP: u16 = Self::OPCODE as u16;
+
+                const FDS: usize = #fd_count;
+            }
+
+            impl<'data> Value<'data> for #name #lifetime {
+                unsafe fn read(
+                    data: &mut *const [u8],
+                    fds: &mut *const [RawFd],
+                ) -> primitives::Result<Self> {
+                    unsafe {
+                        Ok(Self {
+                            #(#fields_read)*
+                        })
+                    }
                 }
 
-                fn write_len(&self) -> u32 {
+                fn len(&self) -> u32 {
                     0 #(#fields_write_len)*
                 }
 
-               fn write<'a>(
-                   &self,
-                   data: &mut ThickPtr<u8>,
-                   fds: &mut ThickPtr<RawFd>,
-               ) -> primitives::Result<()> {
-                   #(#fields_write)*
-                   Ok(())
-               }
+                unsafe fn write(
+                    &self,
+                    data: &mut *mut [u8],
+                    fds: &mut *mut [RawFd],
+                ) -> primitives::Result<()> {
+                    unsafe {
+                        #(#fields_write)*
+                        Ok(())
+                    }
+                }
 
             }
         }
@@ -236,19 +298,19 @@ fn gen_field(arg: &Arg) -> TokenStream {
     });
 
     let typ = match typ {
-        Type::Int => quote! {    Int    },
-        Type::Uint => quote! {   UInt   },
-        Type::Fixed => quote! {  Fixed  },
+        Type::Int => quote! {    int    },
+        Type::Uint => quote! {   uint   },
+        Type::Fixed => quote! {  fixed  },
 
-        Type::Array => quote! {  Array <'data> },
-        Type::String => quote! { String<'data> },
+        Type::Array => quote! {  array <'data> },
+        Type::String => quote! { string<'data> },
 
-        Type::NewId if interface.is_none() => quote! {  NewIdDyn <'data> },
+        Type::NewId if interface.is_none() => quote! {  new_id_dyn <'data> },
 
-        Type::Object => quote! { Object #interface },
-        Type::NewId => quote! {  NewId  #interface },
+        Type::Object => quote! { object #interface },
+        Type::NewId => quote! {  new_id  #interface },
 
-        Type::Fd => quote! {     Fd },
+        Type::Fd => quote! {     fd },
         Type::Destructor => unreachable!(),
     };
 
@@ -286,23 +348,24 @@ fn generate_enum(enum_: &Enum) -> TokenStream {
 
 fn impl_enum(enum_: &Enum) -> TokenStream {
     let name = typ_name(&enum_.name);
-    let variants = enum_
-        .entries
-        .iter()
-        .map(|entry| {
-            let value = Literal::u32_unsuffixed(entry.value);
-            let name = typ_name(&entry.name);
-            quote! {
-                #value => Some(Self::#name),
-            }
-        })
-        .collect::<TokenStream>();
+    let variants = enum_.entries.iter().map(|entry| {
+        let value = Literal::u32_unsuffixed(entry.value);
+        let name = typ_name(&entry.name);
+        quote! {
+            #value => Some(Self::#name),
+        }
+    });
+    let versions = enum_.entries.iter().map(|entry| {
+        let name = typ_name(&entry.name);
+        let version = Literal::u32_unsuffixed(entry.since as u32);
+        quote! { Self::#name => #version, }
+    });
 
     quote! {
-        impl Enum for #name {
-            fn from_u32(int: u32) -> Option<Self> {
-                match int {
-                    #variants
+        impl proto::enumeration for #name {
+            fn from_u32(i: u32) -> Option<Self> {
+                match i {
+                    #(#variants)*
                     _ => None,
                 }
             }
@@ -310,6 +373,33 @@ fn impl_enum(enum_: &Enum) -> TokenStream {
             fn to_u32(&self) -> u32 {
                 *self as u32
             }
+
+            fn since_version(&self) -> u32 {
+                match self {
+                    #(#versions)*
+                }
+            }
+        }
+
+        impl Value<'_> for #name {
+                unsafe fn read(
+                    data: &mut *const [u8],
+                    fds: &mut *const [RawFd],
+                ) -> primitives::Result<Self> {
+                    todo!()
+                }
+
+                fn len(&self) -> u32 {
+                    uint(self.to_u32()).len()
+                }
+
+                unsafe fn write(
+                    &self,
+                    data: &mut *mut [u8],
+                    fds: &mut *mut [RawFd],
+                ) -> primitives::Result<()> {
+                    todo!()
+                }
         }
     }
 }
@@ -426,13 +516,20 @@ fn mod_name(name: &str) -> syn::Ident {
 }
 
 fn typ_name(name: &str) -> syn::Ident {
-    let name = wayland_scanner_lib::util::snake_to_camel(name);
     format_ident!(
         "{prefix}{name}",
-        prefix = if name.chars().next().unwrap().is_numeric() {
-            "_"
-        } else {
-            ""
+        prefix = match () {
+            _ if is_numeric(name) => "_",
+            _ if is_keyword(name) => "_",
+            _ => "",
         }
     )
+}
+
+fn is_numeric(str: &str) -> bool {
+    str.chars().next().unwrap().is_numeric()
+}
+
+fn is_keyword(str: &str) -> bool {
+    matches!(str, "move")
 }

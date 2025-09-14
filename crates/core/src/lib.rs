@@ -1,7 +1,7 @@
 pub use self::{
     error::*,
     interface::{Interface, Opcode},
-    message::{Message, message_hdr},
+    message::{Message, message_header},
     primitives::Value,
     primitives::{array, enumeration, fd, fixed, int, new_id, new_id_dyn, object, string, uint},
     raw_slice::RawSliceExt,

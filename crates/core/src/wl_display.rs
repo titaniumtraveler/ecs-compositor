@@ -163,6 +163,7 @@ pub mod event {
 
         type Opcode = super::Event;
         const OPCODE: Self::Opcode = super::Event::error;
+        const OP: u16 = Self::OPCODE as u16;
 
         const FDS: usize = 0;
     }

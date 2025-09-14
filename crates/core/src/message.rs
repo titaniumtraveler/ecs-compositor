@@ -7,19 +7,21 @@ pub trait Message<'data>: Value<'data> {
 
     type Opcode: Opcode;
     const OPCODE: Self::Opcode;
+    const OP: u16;
 
     /// Number of FD args of this message.
     const FDS: usize;
 }
 
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
-pub struct message_hdr {
+pub struct message_header {
     pub object_id: object,
     pub datalen: u16,
     pub opcode: u16,
 }
 
-impl Value<'_> for message_hdr {
+impl Value<'_> for message_header {
     fn len(&self) -> u32 {
         4 + 2 + 2
     }
@@ -56,7 +58,7 @@ impl Value<'_> for message_hdr {
     }
 }
 
-impl message_hdr {
+impl message_header {
     pub fn content_len(&self) -> u16 {
         self.datalen.wrapping_sub(self.len() as u16)
     }
