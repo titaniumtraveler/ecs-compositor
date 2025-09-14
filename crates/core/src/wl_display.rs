@@ -96,6 +96,10 @@ impl enumeration for Error {
     fn to_u32(&self) -> u32 {
         *self as u32
     }
+
+    fn since_version(&self) -> u32 {
+        1
+    }
 }
 
 impl<'data> Value<'data> for Error {
