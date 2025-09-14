@@ -28,10 +28,6 @@ impl Opcode for Request {
     fn to_u16(self) -> u16 {
         unreachable!()
     }
-
-    fn since_version(&self) -> u32 {
-        1
-    }
 }
 
 #[repr(u16)]
@@ -50,10 +46,6 @@ impl Opcode for Event {
 
     fn to_u16(self) -> u16 {
         self as _
-    }
-
-    fn since_version(&self) -> u32 {
-        1
     }
 }
 
