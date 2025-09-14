@@ -16,9 +16,9 @@ pub trait Message<'data>: Value<'data> {
 
 #[allow(non_camel_case_types)]
 pub struct message_hdr {
-    object_id: object,
-    datalen: u16,
-    opcode: u16,
+    pub object_id: object,
+    pub datalen: u16,
+    pub opcode: u16,
 }
 
 impl Value<'_> for message_hdr {
@@ -55,5 +55,11 @@ impl Value<'_> for message_hdr {
             uint((self.datalen as u32) << 16 | self.opcode as u32).write(data, fds)?;
             Ok(())
         }
+    }
+}
+
+impl message_hdr {
+    pub fn content_len(&self) -> u16 {
+        self.datalen.wrapping_sub(self.len() as u16)
     }
 }
