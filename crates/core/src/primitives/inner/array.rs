@@ -1,7 +1,7 @@
 use crate::{
     RawSliceExt,
     primitives::{Result, Value, align},
-    wl_display::{self, Error},
+    wl_display::{self, error},
 };
 use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonNull};
 
@@ -65,7 +65,7 @@ impl<'data> Value<'data> for string<'data> {
         Ok(string {
             ptr: Some(ptr),
             len: NonZero::new(len)
-                .ok_or(wl_display::Error::invalid_method.msg("empty string not allowed here"))?,
+                .ok_or(wl_display::error::invalid_method.msg("empty string not allowed here"))?,
             _marker: PhantomData,
         })
     }
@@ -113,14 +113,14 @@ pub unsafe fn read(data: &mut *const [u8]) -> Result<(NonNull<u8>, u32)> {
         let len = {
             let len = data
                 .split_at(4)
-                .ok_or_else(|| Error::implementation.msg("reading buffer too short"))?
+                .ok_or_else(|| error::implementation.msg("reading buffer too short"))?
                 .cast::<u32>();
             debug_assert!(len.is_aligned());
             len.read()
         };
 
         let content = data.split_at(align::<4>(len) as usize).ok_or_else(|| {
-            Error::implementation.msg("reading buffer too short for message content")
+            error::implementation.msg("reading buffer too short for message content")
         })?;
 
         // Safety: `data` is guarantied by caller to point to a valid buffer.
@@ -149,7 +149,7 @@ pub unsafe fn write(data: &mut *mut [u8], ptr: Option<NonNull<u8>>, len: u32) ->
         // Check if the buffer has at least header + data space.
         let padded_len = align::<4>(len);
         if data.len() < 4 + padded_len as usize {
-            return Err(wl_display::Error::implementation.msg("not enough buffer provided"));
+            return Err(wl_display::error::implementation.msg("not enough buffer provided"));
         }
 
         let len_hdr = data.split_at_unchecked(4).cast::<u32>();

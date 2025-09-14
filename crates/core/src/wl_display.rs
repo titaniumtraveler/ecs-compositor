@@ -14,7 +14,7 @@ impl Interface for WlDisplay {
     const NAME: &str = "wl_display";
     const VERSION: u32 = 1;
 
-    type Error = Error;
+    type Error = error;
 
     type Request = Request;
     type Event = Event;
@@ -65,7 +65,7 @@ impl Opcode for Event {
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
 #[allow(non_camel_case_types)]
-pub enum Error {
+pub enum error {
     ///server couldn't find object
     invalid_object = 0,
     ///method doesn't exist on the specified interface or malformed request
@@ -76,13 +76,13 @@ pub enum Error {
     implementation = 3,
 }
 
-impl Error {
+impl error {
     pub fn msg(self, msg: &'static str) -> primitives::Error {
         primitives::Error { err: self, msg }
     }
 }
 
-impl enumeration for Error {
+impl enumeration for error {
     fn from_u32(int: u32) -> Option<Self> {
         match int {
             0 => Some(Self::invalid_object),
@@ -102,7 +102,7 @@ impl enumeration for Error {
     }
 }
 
-impl<'data> Value<'data> for Error {
+impl<'data> Value<'data> for error {
     fn len(&self) -> u32 {
         uint(self.to_u32()).len()
     }
@@ -110,7 +110,7 @@ impl<'data> Value<'data> for Error {
     unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> primitives::Result<Self> {
         unsafe {
             Self::from_u32(uint::read(data, fds)?.0)
-                .ok_or(Error::implementation.msg("invalid u32 value for `wl_display::error`"))
+                .ok_or(error::implementation.msg("invalid u32 value for `wl_display::error`"))
         }
     }
 

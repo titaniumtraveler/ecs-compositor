@@ -59,7 +59,7 @@ pub trait Value<'data>: Sized {
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub struct Error {
-    pub err: wl_display::Error,
+    pub err: wl_display::error,
     pub msg: &'static str,
 }
 
