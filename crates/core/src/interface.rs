@@ -27,6 +27,8 @@ impl Interface for () {
 pub trait Opcode: Sized {
     fn from_u16(i: u16) -> Result<Self, u16>;
     fn to_u16(self) -> u16;
+
+    fn fd_count(&self) -> usize;
 }
 
 impl Opcode for u16 {
@@ -36,5 +38,9 @@ impl Opcode for u16 {
 
     fn to_u16(self) -> u16 {
         self
+    }
+
+    fn fd_count(&self) -> usize {
+        0
     }
 }
