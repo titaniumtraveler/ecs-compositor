@@ -1,8 +1,15 @@
 use std::ptr::{NonNull, slice_from_raw_parts, slice_from_raw_parts_mut};
 
 pub trait RawSliceExt: Sized {
+    type Thin;
+
     /// helper function exclusively to be able to reuse `split_at()`
     fn len(&self) -> usize;
+
+    /// # Safety
+    ///
+    /// Should actually be always safe. Just overrides metadata.
+    unsafe fn set_len(&mut self, len: usize);
 
     /// Remove `count` elements from `&mut self`, move pointer forwards and return slice pointing
     /// to the range of items we just removed.
@@ -29,11 +36,34 @@ pub trait RawSliceExt: Sized {
     /// Same as [`Self::split_at()`], see its safety requirements, but doesn't bounds check.
     /// So running this with `self.len() < len` is undefined behavior!
     unsafe fn split_at_unchecked(&mut self, len: usize) -> Self;
+
+    /// # Safety
+    ///
+    /// Should actually be always safe. Basically just discards metadata
+    unsafe fn start(&self) -> Self::Thin;
+
+    /// # Safety
+    ///
+    /// See safety guaranties of `ptr::add()`
+    unsafe fn end(&self) -> Self::Thin;
+
+    /// # Safety
+    ///
+    /// - start <= end
+    unsafe fn from_range(start: Self::Thin, end: Self::Thin) -> Self;
 }
 
 impl<T> RawSliceExt for *const [T] {
+    type Thin = *const T;
+
     fn len(&self) -> usize {
         <*const [T]>::len(*self)
+    }
+
+    unsafe fn set_len(&mut self, len: usize) {
+        unsafe {
+            *self = slice_from_raw_parts(self.start(), len);
+        }
     }
 
     unsafe fn split_at_unchecked(&mut self, len: usize) -> Self {
@@ -43,11 +73,31 @@ impl<T> RawSliceExt for *const [T] {
             split_off
         }
     }
+
+    unsafe fn start(&self) -> Self::Thin {
+        self.cast()
+    }
+
+    unsafe fn end(&self) -> Self::Thin {
+        unsafe { self.cast::<T>().add(self.len()) }
+    }
+
+    unsafe fn from_range(start: Self::Thin, end: Self::Thin) -> Self {
+        unsafe { slice_from_raw_parts(start, end.offset_from_unsigned(start)) }
+    }
 }
 
 impl<T> RawSliceExt for *mut [T] {
+    type Thin = *mut T;
+
     fn len(&self) -> usize {
         <*mut [T]>::len(*self)
+    }
+
+    unsafe fn set_len(&mut self, len: usize) {
+        unsafe {
+            *self = slice_from_raw_parts_mut(self.start(), len);
+        }
     }
 
     unsafe fn split_at_unchecked(&mut self, len: usize) -> Self {
@@ -58,11 +108,32 @@ impl<T> RawSliceExt for *mut [T] {
             split_off
         }
     }
+
+    unsafe fn start(&self) -> Self::Thin {
+        self.cast()
+    }
+
+    unsafe fn end(&self) -> Self::Thin {
+        unsafe { self.cast::<T>().add(self.len()) }
+    }
+
+    unsafe fn from_range(start: Self::Thin, end: Self::Thin) -> Self {
+        unsafe { slice_from_raw_parts_mut(start, end.offset_from_unsigned(start)) }
+    }
 }
 
 impl<T> RawSliceExt for NonNull<[T]> {
+    type Thin = NonNull<T>;
+
     fn len(&self) -> usize {
         <NonNull<[T]>>::len(*self)
+    }
+
+    unsafe fn set_len(&mut self, len: usize) {
+        unsafe {
+            // SAFETY: `self.start` is already NonNull, therefore the derived slice is NonNull too!
+            *self = NonNull::new_unchecked(slice_from_raw_parts_mut(self.start().as_ptr(), len));
+        }
     }
 
     unsafe fn split_at_unchecked(&mut self, count: usize) -> Self {
@@ -78,6 +149,25 @@ impl<T> RawSliceExt for NonNull<[T]> {
                 self.len().unchecked_sub(count),
             ));
             split_off
+        }
+    }
+
+    unsafe fn start(&self) -> Self::Thin {
+        self.cast()
+    }
+
+    unsafe fn end(&self) -> Self::Thin {
+        unsafe { self.cast::<T>().add(self.len()) }
+    }
+
+    unsafe fn from_range(start: Self::Thin, end: Self::Thin) -> Self {
+        unsafe {
+            // SAFETY: `start` is already guarantied to be `NonNull<T>`
+            NonNull::new_unchecked(slice_from_raw_parts_mut(
+                start.as_ptr(),
+                // SAFETY: caller has to guarantie this
+                end.offset_from_unsigned(start),
+            ))
         }
     }
 }
