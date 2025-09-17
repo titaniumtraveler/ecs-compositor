@@ -133,6 +133,34 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
         quote! { #i => Ok(Self::#name), }
     });
 
+    let fd_count = {
+        if !messages.is_empty() {
+            let fd_count = messages.iter().map(|msg| {
+                let name = self::typ_name(&msg.name);
+                let i = Literal::usize_unsuffixed(
+                    msg.args
+                        .iter()
+                        .filter(|arg| matches!(arg.typ, Type::Fd))
+                        .count(),
+                );
+
+                quote! {
+                    Self::#name => #i,
+                }
+            });
+
+            quote! {
+                match self {
+                    #(#fd_count)*
+                }
+            }
+        } else {
+            quote! {
+                unreachable!()
+            }
+        }
+    };
+
     quote! {
         #[derive(Debug, Clone, Copy)]
         pub enum Opcodes {
@@ -149,6 +177,10 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
 
             fn to_u16(self) -> u16 {
                 self as u16
+            }
+
+            fn fd_count(&self) -> usize {
+                #fd_count
             }
         }
     }
