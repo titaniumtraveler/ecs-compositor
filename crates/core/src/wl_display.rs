@@ -170,6 +170,7 @@ pub mod event {
     impl Message<'_> for error {
         type Interface = super::wl_display;
         const VERSION: u32 = 1;
+        const NAME: &'static str = "error";
 
         type Opcode = super::Event;
         const OPCODE: Self::Opcode = super::Event::error;

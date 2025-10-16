@@ -195,6 +195,7 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
         args,
     } = message;
 
+    let str_name = Literal::string(name);
     let name = typ_name(name);
 
     let lifetime = if message.args.iter().any(|arg| {
@@ -264,6 +265,7 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
             impl<'data> Message<'data> for #name #lifetime {
                 type Interface = #iface_name;
                 const VERSION: u32 = #version;
+                const NAME: &'static str = #str_name;
 
                 type Opcode = Opcodes;
                 const OPCODE: Self::Opcode = Self::Opcode::#name;

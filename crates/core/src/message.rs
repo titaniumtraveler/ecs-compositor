@@ -4,6 +4,7 @@ use std::os::unix::prelude::RawFd;
 pub trait Message<'data>: Value<'data> {
     type Interface: Interface;
     const VERSION: u32;
+    const NAME: &'static str;
 
     type Opcode: Opcode;
     const OPCODE: Self::Opcode;
@@ -13,7 +14,7 @@ pub trait Message<'data>: Value<'data> {
     const FDS: usize;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
 pub struct message_header {
     pub object_id: object,
@@ -23,7 +24,7 @@ pub struct message_header {
 
 impl Value<'_> for message_header {
     fn len(&self) -> u32 {
-        4 + 2 + 2
+        Self::size().0 as u32
     }
 
     unsafe fn read(
@@ -59,6 +60,10 @@ impl Value<'_> for message_header {
 }
 
 impl message_header {
+    pub fn size() -> (u16, usize) {
+        (4 + 2 + 2, 0)
+    }
+
     pub fn content_len(&self) -> u16 {
         self.datalen.wrapping_sub(self.len() as u16)
     }

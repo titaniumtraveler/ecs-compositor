@@ -12,10 +12,17 @@ use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd};
 /// Note that the Rust impl uses [`Option<Object<Object>>`] instead.
 /// (And makes sure to provide a niche using [`NonZero<u32>`] to make sure that doesn't have any
 /// runtime impact)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct object<I: Interface = ()> {
-    id: NonZero<u32>,
-    _marker: PhantomData<I>,
+    pub id: NonZero<u32>,
+    pub _marker: PhantomData<I>,
+}
+
+impl<I: Interface> Copy for object<I> {}
+impl<I: Interface> Clone for object<I> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<I: Interface> object<I> {
@@ -37,6 +44,13 @@ impl<I: Interface> object<I> {
 
     pub fn id(&self) -> NonZero<u32> {
         self.id
+    }
+
+    pub fn to_new_id(self) -> new_id<I> {
+        new_id {
+            id: self.id,
+            _marker: self._marker,
+        }
     }
 
     pub fn err(self, err: I::Error, msg: &'static str) -> wl_display::event::error<I> {
@@ -94,14 +108,22 @@ impl<I: Interface> Value<'_> for Option<object<I>> {
 /// The 32-bit object ID. Generally, the interface used for the new object is inferred from the
 /// xml, but in the case where it's not specified, a new_id is preceded by a string specifying the
 /// interface name, and a uint specifying the version.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct new_id<I: Interface = ()> {
     pub id: NonZero<u32>,
     pub _marker: PhantomData<I>,
 }
 
+impl<I: Interface> Copy for new_id<I> {}
+impl<I: Interface> Clone for new_id<I> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 impl<I: Interface> new_id<I> {
-    pub fn cast<To: Interface>(self) -> new_id<To> {
-        let new_id { id, _marker: _ } = self;
+    pub fn cast<To: Interface>(&self) -> new_id<To> {
+        let new_id { id, _marker: _ } = *self;
 
         new_id {
             id,
