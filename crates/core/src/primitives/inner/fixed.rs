@@ -38,6 +38,7 @@ impl fixed {
 }
 
 impl Value<'_> for fixed {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4
     }

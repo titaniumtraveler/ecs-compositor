@@ -19,6 +19,7 @@ pub struct array<'a> {
 }
 
 impl<'data> Value<'data> for array<'data> {
+    const FDS: usize = 0;
     #[inline]
     fn len(&self) -> u32 {
         4 + align::<4>(self.len)
@@ -53,6 +54,7 @@ pub struct string<'a> {
 }
 
 impl<'data> Value<'data> for string<'data> {
+    const FDS: usize = 0;
     #[inline]
     fn len(&self) -> u32 {
         4 + align::<4>(self.len.get())
@@ -77,6 +79,7 @@ impl<'data> Value<'data> for string<'data> {
 }
 
 impl<'data> Value<'data> for Option<string<'data>> {
+    const FDS: usize = 0;
     #[inline]
     fn len(&self) -> u32 {
         4 + self.as_ref().map(string::len).unwrap_or(0)

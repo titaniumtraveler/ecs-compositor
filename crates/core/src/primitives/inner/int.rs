@@ -14,6 +14,7 @@ pub struct int(pub i32);
 pub struct uint(pub u32);
 
 impl<'data> Value<'data> for int {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4
     }
@@ -41,6 +42,7 @@ impl<'data> Value<'data> for int {
 }
 
 impl<'data> Value<'data> for uint {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4
     }

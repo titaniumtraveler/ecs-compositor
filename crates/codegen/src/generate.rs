@@ -261,6 +261,14 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
             }
         });
 
+        let fields_debug = args.iter().map(|arg| {
+            let name = mod_name(&arg.name);
+            let fmt = Literal::string(&format!("{name}: {{}}, "));
+            quote! {
+                write!(f, #fmt, self.#name)?;
+            }
+        });
+
         quote! {
             impl<'data> Message<'data> for #name #lifetime {
                 type Interface = #iface_name;
@@ -270,11 +278,10 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
                 type Opcode = Opcodes;
                 const OPCODE: Self::Opcode = Self::Opcode::#name;
                 const OP: u16 = Self::OPCODE as u16;
-
-                const FDS: usize = #fd_count;
             }
 
             impl<'data> Value<'data> for #name #lifetime {
+                const FDS: usize = #fd_count;
                 unsafe fn read(
                     data: &mut *const [u8],
                     fds: &mut *const [RawFd],
@@ -301,6 +308,16 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
                     }
                 }
 
+            }
+
+            impl #lifetime std::fmt::Display for #name #lifetime {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{iface}.{msg}", iface = #iface_name::NAME, msg = #name::NAME)?;
+                    write!(f, "( ")?;
+                    #(#fields_debug)*
+                    write!(f, ")")?;
+                    Ok(())
+                }
             }
         }
     };
@@ -416,24 +433,25 @@ fn impl_enum(enum_: &Enum) -> TokenStream {
         }
 
         impl Value<'_> for #name {
-                unsafe fn read(
-                    data: &mut *const [u8],
-                    fds: &mut *const [RawFd],
-                ) -> primitives::Result<Self> {
-                    todo!()
-                }
+            const FDS: usize = 0;
+            unsafe fn read(
+                data: &mut *const [u8],
+                fds: &mut *const [RawFd],
+            ) -> primitives::Result<Self> {
+                todo!()
+            }
 
-                fn len(&self) -> u32 {
-                    uint(self.to_u32()).len()
-                }
+            fn len(&self) -> u32 {
+                uint(self.to_u32()).len()
+            }
 
-                unsafe fn write(
-                    &self,
-                    data: &mut *mut [u8],
-                    fds: &mut *mut [RawFd],
-                ) -> primitives::Result<()> {
-                    todo!()
-                }
+            unsafe fn write(
+                &self,
+                data: &mut *mut [u8],
+                fds: &mut *mut [RawFd],
+            ) -> primitives::Result<()> {
+                todo!()
+            }
         }
     }
 }

@@ -59,6 +59,7 @@ impl<I: Interface> object<I> {
 }
 
 impl<I: Interface> Value<'_> for object<I> {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4
     }
@@ -80,6 +81,7 @@ impl<I: Interface> Value<'_> for object<I> {
 }
 
 impl<I: Interface> Value<'_> for Option<object<I>> {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4
     }
@@ -148,6 +150,7 @@ impl<I: Interface> new_id<I> {
 }
 
 impl<I: Interface> Value<'_> for new_id<I> {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4
     }
@@ -175,6 +178,7 @@ pub struct new_id_dyn<'data> {
 }
 
 impl<'data> Value<'data> for new_id_dyn<'data> {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         self.name.len() + self.version.len() + self.id.len()
     }

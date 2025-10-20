@@ -1,6 +1,8 @@
 use crate::wl_display;
 use std::os::fd::RawFd;
 
+pub mod fmt;
+
 // Module to prevent name collisions with the contained types.
 mod inner {
     #![allow(non_camel_case_types)]
@@ -24,6 +26,8 @@ pub use self::inner::{
 
 #[allow(clippy::len_without_is_empty)] // We are not a collection
 pub trait Value<'data>: Sized {
+    /// Number of FD args of this value.
+    const FDS: usize;
     fn len(&self) -> u32;
 
     /// # Safety

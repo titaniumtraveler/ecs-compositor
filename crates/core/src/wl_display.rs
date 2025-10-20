@@ -108,6 +108,7 @@ pub mod enumeration {
     }
 
     impl<'data> Value<'data> for error {
+        const FDS: usize = 0;
         fn len(&self) -> u32 {
             uint(self.to_u32()).len()
         }
@@ -175,8 +176,6 @@ pub mod event {
         type Opcode = super::Event;
         const OPCODE: Self::Opcode = super::Event::error;
         const OP: u16 = Self::OPCODE as u16;
-
-        const FDS: usize = 0;
     }
 
     fn to_str(str: &str) -> Option<string<'_>> {
@@ -188,6 +187,7 @@ pub mod event {
     }
 
     impl Value<'_> for error {
+        const FDS: usize = 0;
         fn len(&self) -> u32 {
             self.object.len() + self.err.len() + to_str(self.msg).len()
         }

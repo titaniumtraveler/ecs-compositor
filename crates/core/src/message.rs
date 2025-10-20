@@ -9,9 +9,6 @@ pub trait Message<'data>: Value<'data> {
     type Opcode: Opcode;
     const OPCODE: Self::Opcode;
     const OP: u16;
-
-    /// Number of FD args of this message.
-    const FDS: usize;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -23,8 +20,9 @@ pub struct message_header {
 }
 
 impl Value<'_> for message_header {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
-        Self::size().0 as u32
+        Self::DATA_LEN as u32
     }
 
     unsafe fn read(
@@ -60,9 +58,10 @@ impl Value<'_> for message_header {
 }
 
 impl message_header {
-    pub fn size() -> (u16, usize) {
-        (4 + 2 + 2, 0)
-    }
+    pub const DATA_LEN: u16 = 4 + 2 + 2;
+    pub const CTRL_LEN: usize = 0;
+
+    pub const COMBINED_LEN: (u16, usize) = (Self::DATA_LEN, Self::CTRL_LEN);
 
     pub fn content_len(&self) -> u16 {
         self.datalen.wrapping_sub(self.len() as u16)

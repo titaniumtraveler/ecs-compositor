@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bstr = "1.12.0"
 
 [lints.clippy]
 len_without_is_empty = "allow"
