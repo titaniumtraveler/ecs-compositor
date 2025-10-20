@@ -1,11 +1,12 @@
 use crate::connection::msg_io::{Msg, cmsg_cursor::CmsgCursor};
 use anyhow::{Result, anyhow};
+use bitflags::bitflags;
 use ecs_compositor_core::{Message, RawSliceExt, Value, message_header, object};
 use libc::{CMSG_SPACE, EWOULDBLOCK, SCM_RIGHTS, SOL_SOCKET, cmsghdr};
 use std::{
     alloc::{self, Layout},
     cmp,
-    fmt::Debug,
+    fmt::{self, Debug, Display, Formatter},
     io,
     os::{
         fd::{AsRawFd, RawFd},
@@ -13,7 +14,7 @@ use std::{
     },
     ptr::{null_mut, slice_from_raw_parts_mut},
 };
-use tokio::io::{Interest, Ready, unix::AsyncFdReadyGuard};
+use tokio::io::{Ready, unix::AsyncFdReadyGuard};
 use tracing::{info, instrument, trace, warn};
 
 #[derive(Debug)]
@@ -23,13 +24,54 @@ pub struct Io {
 
     cmsg_buf: [u8; unsafe { CMSG_SPACE(4 * MAX_FDS) as usize }],
 
-    rx_interest: bool,
-    tx_interest: bool,
-
-    rx_closed: bool,
-    tx_closed: bool,
+    interest: Interest,
 
     pub rx_hdr: Option<message_header>,
+}
+
+bitflags! {
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    pub struct Interest: u8 {
+        const RECV        = 1 << 1;
+        const SEND        = 1 << 2;
+        const RECV_CLOSED = 1 << 3;
+        const SEND_CLOSED = 1 << 4;
+    }
+}
+
+impl Display for Interest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut iter = self.iter_names();
+
+        let (str, _) = iter.next().unwrap_or(("EMPTY", Self::empty()));
+        f.write_str(str)?;
+
+        for (str, _) in iter {
+            f.write_str(" | ")?;
+            f.write_str(str)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn io_ready(guard: &AsyncFdReadyGuard<UnixStream>) -> Interest {
+    let ready = guard.ready();
+    let mut out = Interest::empty();
+    if ready.is_readable() {
+        out.insert(Interest::RECV);
+    }
+    if ready.is_read_closed() {
+        out.insert(Interest::RECV_CLOSED);
+    }
+    if ready.is_writable() {
+        out.insert(Interest::SEND);
+    }
+    if ready.is_write_closed() {
+        out.insert(Interest::SEND_CLOSED);
+    }
+
+    out
 }
 
 impl Io {
@@ -37,30 +79,31 @@ impl Io {
         Ok(Io {
             tx: BufDir::new()?,
             rx: BufDir::new()?,
+
             rx_hdr: None,
-            rx_closed: false,
-            tx_closed: false,
             cmsg_buf: [0; _],
-            rx_interest: true,
-            tx_interest: false,
+
+            interest: Interest::RECV,
         })
     }
 
-    pub fn query_interest(&self) -> Option<Interest> {
-        match (self.rx_interest, self.tx_interest) {
-            (false, false) => None,
-            (true, false) => Some(Interest::READABLE),
-            (false, true) => Some(Interest::WRITABLE),
-            (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
+    pub fn query_interest(&self) -> Option<tokio::io::Interest> {
+        match self.interest {
+            interest if interest.contains(Interest::RECV | Interest::SEND) => {
+                Some(tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE)
+            }
+            interest if interest.contains(Interest::RECV) => Some(tokio::io::Interest::READABLE),
+            interest if interest.contains(Interest::SEND) => Some(tokio::io::Interest::WRITABLE),
+            _ => None,
         }
     }
 
-    #[instrument(name = "drive_io", level = "trace", fields(is_readable = guard.ready().is_readable(), is_writable = guard.ready().is_writable()), ret, skip_all)]
+    #[instrument(name = "drive_io", level = "trace", fields(interest = %self.interest, ready = %io_ready(guard)), ret, skip_all)]
     pub fn drive_io(&mut self, guard: &mut AsyncFdReadyGuard<UnixStream>) -> io::Result<()> {
         let ready = guard.ready();
 
-        let mut reading = self.rx_interest && ready.is_readable();
-        let mut writing = self.tx_interest && ready.is_writable();
+        let mut reading = self.interest.contains(Interest::RECV) && ready.is_readable();
+        let mut writing = self.interest.contains(Interest::SEND) && ready.is_writable();
 
         loop {
             if !reading && !writing {
@@ -88,8 +131,8 @@ impl Io {
             let fd = &mut self.rx.fd;
             let mut ctrl = &mut self.cmsg_buf as *mut [u8];
 
-            if self.rx_closed {
-                self.rx_interest = false;
+            if self.interest.contains(Interest::RECV_CLOSED) {
+                self.interest.remove(Interest::RECV);
                 return Ok(false);
             }
 
@@ -109,7 +152,7 @@ impl Io {
                 if unused.len() < WAYLAND_MAX_MESSAGE_LEN * 2 {
                     match self.rx_hdr {
                         None if HDR_LEN <= da.data.len() => {
-                            self.rx_interest = false;
+                            self.interest.remove(Interest::RECV);
                             return Ok(false);
                         }
                         None => {
@@ -119,7 +162,7 @@ impl Io {
                         }
 
                         Some(hdr) if hdr.content_len() as usize <= da.data.len() => {
-                            self.rx_interest = false;
+                            self.interest.remove(Interest::RECV);
                             return Ok(false);
                         }
                         Some(hdr) => {
@@ -166,8 +209,8 @@ impl Io {
                 // fd closed on the other side
                 Ok(None) => {
                     trace!(fd = ?guard.get_inner(), "closed");
-                    self.rx_interest = false;
-                    self.rx_closed = true;
+                    self.interest.remove(Interest::RECV);
+                    self.interest.insert(Interest::RECV_CLOSED);
 
                     Ok(false)
                 }
@@ -254,10 +297,10 @@ impl Io {
 
             info!(len = &*da.data, "data_len");
 
-            if da.data.is_empty() || self.rx_closed {
+            if da.data.is_empty() || self.interest.contains(Interest::SEND_CLOSED) {
                 trace!("data empty");
 
-                self.rx_interest = false;
+                self.interest.remove(Interest::RECV);
                 return Ok(false);
             }
 
@@ -292,8 +335,8 @@ impl Io {
                 Ok(None) => {
                     trace!("closed");
 
-                    self.tx_interest = false;
-                    self.tx_closed = true;
+                    self.interest.remove(Interest::RECV);
+                    self.interest.insert(Interest::RECV_CLOSED);
 
                     Ok(false)
                 }
@@ -310,7 +353,7 @@ impl Io {
                         .unwrap();
 
                     if da.data.is_empty() {
-                        self.tx_interest = false;
+                        self.interest.remove(Interest::RECV);
                         return Ok(false);
                     }
 
@@ -344,8 +387,8 @@ impl Io {
 
             info!(len = data_len, "requested datalen");
 
-            if !self.tx_closed {
-                self.tx_interest = true;
+            if !self.interest.contains(Interest::SEND_CLOSED) {
+                self.interest.insert(Interest::SEND);
             }
 
             match (
@@ -398,8 +441,8 @@ impl Io {
             ) {
                 (Some(da), Some(fd)) => Some((cursor, da, fd)),
                 _ => {
-                    if !self.rx_closed {
-                        self.rx_interest = true;
+                    if !self.interest.contains(Interest::RECV_CLOSED) {
+                        self.interest.insert(Interest::RECV)
                     }
 
                     self.rx.restore_cursor(cursor);
@@ -464,7 +507,7 @@ impl<T> Debug for RingBuf<T>
 where
     T: Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         unsafe {
             f.debug_struct("Buf")
                 .field(
