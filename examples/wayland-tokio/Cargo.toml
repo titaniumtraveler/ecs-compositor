@@ -1,0 +1,25 @@
+[package]
+name = "wayland-tokio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0.99"
+bstr = "1.12.0"
+console-subscriber = "0.4.1"
+ecs-compositor-core.workspace = true
+libc = { version = "0.2.175", features = ["extra_traits"] }
+tokio = { workspace = true, features = ["full", "tracing"] }
+tracing = { version = "0.1.41", features = ["async-await"] }
+tracing-subscriber = { version = "0.3.20", features = ["json"] }
+# tracing-tracy = { version = "0.11.4", features = ["ondemand"] }
+
+[lints]
+workspace = true
+
+[build-dependencies]
+ecs-compositor-codegen.workspace = true
