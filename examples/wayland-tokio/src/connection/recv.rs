@@ -1,5 +1,7 @@
 use crate::connection::{Connection, InterfaceDir, Io, Object, ready_fut::DriveIo};
 use ecs_compositor_core::{Interface, Message, Opcode, Value, message_header};
+use std::fmt::{self, Debug};
+use std::os::fd::AsRawFd;
 use std::{
     future::Future,
     io,
@@ -9,7 +11,7 @@ use std::{
     sync::MutexGuard,
     task::{Context, Poll, ready},
 };
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 impl<Conn, I, Dir> Object<Conn, I, Dir>
 where
@@ -55,6 +57,10 @@ where
             Poll::Pending => Poll::Pending,
         }
     }
+
+    fn fd(&self) -> RawFd {
+        self.obj.conn.as_ref().fd.as_raw_fd()
+    }
 }
 
 impl<'a, Conn, I, Dir, Fut> Future for Recv<'a, Conn, I, Dir, Fut>
@@ -65,6 +71,7 @@ where
     Fut: DriveIo,
 {
     type Output = io::Result<MsgBuf<'a, Dir, I>>;
+    #[instrument(name = "poll_recv", level = "trace", fields(fd = self.fd(), id = self.obj.id.id, interface = I::NAME), skip_all)]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         unsafe {
             let obj = self.obj;
@@ -73,25 +80,32 @@ where
             let mut io = match conn.try_lock_io_buf() {
                 Some(io) => io,
                 None => {
+                    trace!(return = ?Poll::<()>::Pending, "waiting on io lock");
+
                     obj.register_recv(cx);
                     return Poll::Pending;
                 }
             };
 
-            let (hdr, (_, da, fd)) = loop {
+            let (hdr, (_, buf)) = loop {
+                trace!("loop");
                 match io.rx_hdr {
                     None => {
-                        let Some((_, mut da, mut fd)) = io.rx_msg_buf(message_header::COMBINED_LEN)
-                        else {
+                        let Some((_, buf)) = io.rx_msg_buf(message_header::COMBINED_LEN) else {
                             ready!(self.drive_io(&mut io, cx))?;
                             continue;
                         };
 
                         io.rx_hdr = Some(
-                            message_header::read(&mut da, &mut fd)
-                                .ok()
-                                .expect("failed to read header"),
+                            message_header::read(
+                                &mut buf.da.cast_const(),
+                                &mut buf.fd.cast_const(),
+                            )
+                            .ok()
+                            .expect("failed to read header"),
                         );
+                        trace!(hdr = ?io.rx_hdr, "parsed header");
+                        continue;
                     }
                     Some(hdr) => {
                         if obj.id.id() == hdr.object_id.id() {
@@ -110,20 +124,19 @@ where
                                     .fd_count(),
                             );
                             match io.rx_msg_buf(size) {
-                                Some(data) => break (hdr, data),
+                                Some(data) => {
+                                    io.rx_hdr = None;
+
+                                    break (hdr, data);
+                                }
                                 None => {
                                     ready!(self.drive_io(&mut io, cx))?;
                                     continue;
                                 }
                             }
-                        } else if let Some(entry) = obj.registry().receiver_map.get(&hdr.object_id)
+                        } else if let mut registry = obj.registry()
+                            && let Some(entry) = { registry.receiver_map.get(&hdr.object_id) }
                         {
-                            trace!(
-                                "dispatching from {obj} to {id}",
-                                obj = obj,
-                                id = hdr.object_id.id(),
-                            );
-
                             let size = (
                                 hdr.content_len(),
                                 (entry.fd_count)(hdr.opcode)
@@ -137,9 +150,15 @@ where
                                     .unwrap(),
                             );
                             match io.rx_msg_buf(size) {
-                                Some(_) => {
+                                Some((cursor, _)) => {
+                                    trace!(return = ?Poll::<()>::Pending, id = hdr.object_id.id(), "dispatching to object");
+
+                                    io.rx.restore_cursor(cursor);
                                     drop(io);
+
                                     entry.waker.wake_by_ref();
+                                    registry.register_recv(obj.id, cx);
+
                                     return Poll::Pending;
                                 }
                                 None => {
@@ -149,22 +168,26 @@ where
                             }
                         } else {
                             debug!(
+                                return = ?Poll::<()>::Pending,
                                 "`{obj}` received message addressed to unknown ID `{id}`, this *could* indicate a deadlock",
                                 obj = obj,
                                 id = hdr.object_id.id(),
                             );
 
+                            obj.register_recv(cx);
                             return Poll::Pending;
                         }
                     }
                 }
             };
 
+            obj.wake_recver(cx);
+
             Poll::Ready(Ok(MsgBuf {
                 _io: io,
                 hdr,
-                da,
-                fd,
+                da: buf.da,
+                fd: buf.fd,
                 dir: PhantomData,
             }))
         }
@@ -177,6 +200,12 @@ pub struct MsgBuf<'a, Dir: InterfaceDir<I>, I: Interface> {
     da: *const [u8],
     fd: *const [RawFd],
     dir: PhantomData<(Dir, I)>,
+}
+
+impl<'a, Dir: InterfaceDir<I>, I: Interface> Debug for MsgBuf<'a, Dir, I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.hdr, f)
+    }
 }
 
 impl<'a, Dir, I> MsgBuf<'a, Dir, I>

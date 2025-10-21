@@ -56,14 +56,8 @@ impl Msg {
                 msg_flags: self.flags,
             };
 
-            trace!(
-                socket,
-                msg = ?msg_debug(&msg),
-                flags,
-                "recvmsg(socket, msg, flags)"
-            );
             let res = libc::recvmsg(socket, &mut msg, flags);
-            self.handle_res(&msg, res)
+            self.handle_res(socket, &msg, flags, res)
         }
     }
 
@@ -92,11 +86,17 @@ impl Msg {
                 "sendmsg(socket, msg, flags)"
             );
             let res = libc::sendmsg(socket, &msg, flags);
-            self.handle_res(&msg, res)
+            self.handle_res(socket, &msg, flags, res)
         }
     }
 
-    fn handle_res(&mut self, msg: &msghdr, res: ssize_t) -> Result<Option<Self>, c_int> {
+    fn handle_res(
+        &mut self,
+        socket: RawFd,
+        msg: &msghdr,
+        flags: c_int,
+        res: ssize_t,
+    ) -> Result<Option<Self>, c_int> {
         unsafe {
             match res {
                 0 => {
@@ -114,7 +114,12 @@ impl Msg {
                         .split_at(msg.msg_controllen)
                         .expect("ctrl buf too short");
 
-                    trace!("success");
+                    trace!(
+                        socket,
+                        msg = ?msg_debug(msg),
+                        flags,
+                        "msg(socket, msg, flags)"
+                    );
 
                     Ok(Some(Self {
                         data,

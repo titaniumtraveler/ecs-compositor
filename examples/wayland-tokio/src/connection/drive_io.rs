@@ -2,7 +2,7 @@ use crate::connection::msg_io::{Msg, cmsg_cursor::CmsgCursor};
 use anyhow::{Result, anyhow};
 use bitflags::bitflags;
 use ecs_compositor_core::{Message, RawSliceExt, Value, message_header, object};
-use libc::{CMSG_SPACE, EWOULDBLOCK, SCM_RIGHTS, SOL_SOCKET, cmsghdr};
+use libc::{CMSG_SPACE, EWOULDBLOCK, MSG_DONTWAIT, SCM_RIGHTS, SOL_SOCKET, cmsghdr};
 use std::{
     alloc::{self, Layout},
     cmp,
@@ -15,18 +15,17 @@ use std::{
     ptr::{null_mut, slice_from_raw_parts_mut},
 };
 use tokio::io::{Ready, unix::AsyncFdReadyGuard};
-use tracing::{info, instrument, trace, warn};
+use tracing::{instrument, trace, warn};
 
 #[derive(Debug)]
 pub struct Io {
-    pub tx: BufDir,
-    pub rx: BufDir,
+    pub(crate) tx: BufDir,
+    pub(crate) rx: BufDir,
+
+    pub(crate) interest: Interest,
+    pub(crate) rx_hdr: Option<message_header>,
 
     cmsg_buf: [u8; unsafe { CMSG_SPACE(4 * MAX_FDS) as usize }],
-
-    interest: Interest,
-
-    pub rx_hdr: Option<message_header>,
 }
 
 bitflags! {
@@ -105,6 +104,7 @@ impl Io {
         let mut reading = self.interest.contains(Interest::RECV) && ready.is_readable();
         let mut writing = self.interest.contains(Interest::SEND) && ready.is_writable();
 
+        let mut count = 0;
         loop {
             if !reading && !writing {
                 break;
@@ -117,9 +117,10 @@ impl Io {
             if writing {
                 writing = self.send(guard)?;
             }
-        }
 
-        trace!("exit");
+            count += 1;
+            trace!(reading, writing, count)
+        }
 
         Ok(())
     }
@@ -205,7 +206,7 @@ impl Io {
                 flags: 0,
             };
 
-            match msg.recv(guard.get_inner().as_raw_fd(), 0) {
+            match msg.recv(guard.get_inner().as_raw_fd(), MSG_DONTWAIT) {
                 // fd closed on the other side
                 Ok(None) => {
                     trace!(fd = ?guard.get_inner(), "closed");
@@ -295,12 +296,10 @@ impl Io {
             let da = &mut self.tx.da;
             let fd = &mut self.tx.fd;
 
-            info!(len = &*da.data, "data_len");
-
             if da.data.is_empty() || self.interest.contains(Interest::SEND_CLOSED) {
                 trace!("data empty");
 
-                self.interest.remove(Interest::RECV);
+                self.interest.remove(Interest::SEND);
                 return Ok(false);
             }
 
@@ -330,13 +329,13 @@ impl Io {
                 flags: 0,
             };
 
-            match msg.send(guard.get_inner().as_raw_fd(), 0) {
+            match msg.send(guard.get_inner().as_raw_fd(), MSG_DONTWAIT) {
                 // fd closed on the other side
                 Ok(None) => {
                     trace!("closed");
 
-                    self.interest.remove(Interest::RECV);
-                    self.interest.insert(Interest::RECV_CLOSED);
+                    self.interest.remove(Interest::SEND);
+                    self.interest.insert(Interest::SEND_CLOSED);
 
                     Ok(false)
                 }
@@ -353,7 +352,7 @@ impl Io {
                         .unwrap();
 
                     if da.data.is_empty() {
-                        self.interest.remove(Interest::RECV);
+                        self.interest.remove(Interest::SEND);
                         return Ok(false);
                     }
 
@@ -369,7 +368,7 @@ impl Io {
         }
     }
 
-    #[instrument(name = "tx buf write", level = "trace", skip_all)]
+    #[instrument(name = "tx buf write", level = "trace", ret, skip_all)]
     pub fn tx_msg_buf<'a, M>(
         &mut self,
         object_id: object<M::Interface>,
@@ -385,7 +384,13 @@ impl Io {
             let data_len = message_header::DATA_LEN as usize + msg.len() as usize;
             let ctrl_len = message_header::CTRL_LEN + M::FDS;
 
-            info!(len = data_len, "requested datalen");
+            trace!(
+                expected_data = data_len,
+                expected_ctrl = ctrl_len,
+                actual_data = tx.da.unused_end().len(),
+                actual_ctrl = tx.fd.unused_end().len(),
+                "send buf write"
+            );
 
             if !self.interest.contains(Interest::SEND_CLOSED) {
                 self.interest.insert(Interest::SEND);
@@ -396,13 +401,8 @@ impl Io {
                 tx.fd.unused_end().split_at(ctrl_len),
             ) {
                 (Some(mut da), Some(mut fd)) => {
-                    trace!("success");
-                    info!(len = tx.da.data.len(), data_len = data_len, "set datalen");
-
                     tx.da.data.set_len(tx.da.data.len() + data_len);
                     tx.fd.data.set_len(tx.fd.data.len() + ctrl_len);
-
-                    info!(len = tx.da.data.len(), "set datalen");
 
                     message_header {
                         object_id: object_id.cast(),
@@ -423,14 +423,19 @@ impl Io {
         }
     }
 
-    #[instrument(name = "rx buf write read", level = "trace", fields(data_len = da, ctrl_len = fd), skip_all)]
-    pub fn rx_msg_buf(
-        &mut self,
-        (da, fd): (u16, usize),
-    ) -> Option<(IoBuf, *const [u8], *const [RawFd])> {
+    #[instrument(name = "rx buf write read", level = "trace", fields(data_len = da, ctrl_len = fd), ret, skip_all)]
+    pub fn rx_msg_buf(&mut self, (da, fd): (u16, usize)) -> Option<(IoBuf, IoBuf)> {
         unsafe {
             let rx = &mut self.rx;
             let cursor = rx.save_cursor();
+
+            trace!(
+                expected_data = da,
+                expected_ctrl = fd,
+                actual_data = self.rx.da.data.len(),
+                actual_ctrl = self.rx.fd.data.len(),
+                "recv buf read"
+            );
 
             let data_len = da as usize;
             let ctrl_len = fd;
@@ -439,7 +444,7 @@ impl Io {
                 self.rx.da.data.split_at(data_len),
                 self.rx.fd.data.split_at(ctrl_len),
             ) {
-                (Some(da), Some(fd)) => Some((cursor, da, fd)),
+                (Some(da), Some(fd)) => Some((cursor, IoBuf { da, fd })),
                 _ => {
                     if !self.interest.contains(Interest::RECV_CLOSED) {
                         self.interest.insert(Interest::RECV)
@@ -477,14 +482,14 @@ impl BufDir {
 }
 
 impl BufDir {
-    fn save_cursor(&mut self) -> IoBuf {
+    pub fn save_cursor(&mut self) -> IoBuf {
         IoBuf {
             da: self.da.data,
             fd: self.fd.data,
         }
     }
 
-    fn restore_cursor(&mut self, cursor: IoBuf) {
+    pub fn restore_cursor(&mut self, cursor: IoBuf) {
         self.da.data = cursor.da;
         self.fd.data = cursor.fd;
     }

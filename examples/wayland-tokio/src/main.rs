@@ -19,13 +19,16 @@ mod protocols {
     include!(concat!(env!("OUT_DIR"), "/wayland-core.rs"));
 }
 
+macro_rules! new_id {
+    ($conn:expr, $obj:ident) => {{
+        let id;
+        (id, $obj) = $conn.new_object();
+        id
+    }};
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // tracing::subscriber::set_global_default(
-    //     tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default()),
-    // )
-    // .expect("setup tracy layer");
-    // console_subscriber::init();
     tracing_subscriber::registry()
         .with(console_subscriber::spawn())
         .with(
@@ -41,7 +44,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[instrument]
+#[instrument(ret)]
 async fn inner() -> Result<()> {
     let conn = Arc::new(Connection::<Client>::new()?);
 
@@ -68,20 +71,21 @@ async fn inner() -> Result<()> {
         }
     });
 
-    let (id, registry) = conn.new_object();
+    let registry;
     display
-        .send(&wl_display::request::get_registry { registry: id })
+        .send(&wl_display::request::get_registry {
+            registry: new_id!(conn, registry),
+        })
         .await?;
 
     loop {
-        info!("receiving event:");
         let event = registry.recv().await?;
         match event.decode_opcode() {
             wl_registry::event::Opcodes::global => {
-                info!(msg = %event.decode_msg::<wl_registry::event::global>().ok().unwrap())
+                info!(msg = %event.decode_msg::<wl_registry::event::global>().ok().unwrap());
             }
             wl_registry::event::Opcodes::global_remove => {
-                info!(msg = %event.decode_msg::<wl_registry::event::global_remove>().ok().unwrap())
+                info!(msg = %event.decode_msg::<wl_registry::event::global_remove>().ok().unwrap());
             }
         }
     }

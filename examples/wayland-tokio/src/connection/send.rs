@@ -1,12 +1,6 @@
 use crate::connection::{Connection, InterfaceDir, Io, Object, ready_fut::DriveIo};
 use ecs_compositor_core::{Interface, Message};
-use std::{
-    fmt::Display,
-    future::Future,
-    io,
-    pin::Pin,
-    task::{Context, Poll, ready},
-};
+use std::{fmt::Display, future::Future, io, os::fd::{AsRawFd, RawFd}, pin::Pin, task::{ready, Context, Poll}};
 use tracing::instrument;
 
 impl<Conn, I, Dir> Object<Conn, I, Dir>
@@ -64,6 +58,10 @@ where
     ) -> Poll<io::Result<()>> {
         self.ready_fut().poll_with_io(io, cx)
     }
+
+    fn fd(&self) -> RawFd {
+        self.obj.conn.as_ref().fd.as_raw_fd()
+    }
 }
 
 impl<'a, Conn, I, Dir, Msg, Fut> Future for Send<'a, Conn, I, Dir, Msg, Fut>
@@ -75,6 +73,7 @@ where
     Fut: DriveIo,
 {
     type Output = io::Result<()>;
+    #[instrument(name = "poll_send", level = "trace", fields(fd = self.fd(), id = self.obj.id.id, interface = I::NAME, did_send = self.did_send), skip_all, ret(Debug))]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         unsafe {
             let obj = self.obj;
@@ -118,6 +117,8 @@ where
                 if !io.tx.is_empty() {
                     ready!(self.drive_io(&mut io, cx))?;
                 }
+            } else {
+                obj.wake_recver(cx);
             }
 
             Poll::Ready(Ok(()))

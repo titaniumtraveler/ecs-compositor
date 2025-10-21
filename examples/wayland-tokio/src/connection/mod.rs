@@ -17,6 +17,7 @@ use std::{
     task::{Context, Waker},
 };
 use tokio::io::unix::AsyncFd;
+use tracing::{instrument, trace};
 
 pub use self::{drive_io::Io, recv::Recv, send::Send};
 
@@ -228,43 +229,84 @@ where
     }
 
     fn register_recv(&self, cx: &mut Context<'_>) {
-        match self.registry().receiver_map.entry(self.id.cast::<()>()) {
-            btree_map::Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(Entry {
-                    waker: cx.waker().clone(),
-                    fd_count: <Dir as InterfaceDir<I>>::recv_fd_count,
-                });
-            }
-            btree_map::Entry::Occupied(occupied_entry) => {
-                occupied_entry.into_mut().waker.clone_from(cx.waker());
-            }
-        }
+        self.registry().register_recv(self.id, cx);
     }
 
     fn register_send(&self, cx: &mut Context<'_>) {
-        self.registry().sender_queue.push_back(cx.waker().clone());
+        self.registry().register_send(cx);
     }
 
     fn register_send_locked(&self, cx: &mut Context<'_>) {
-        let mut registry = self.registry();
-        match &mut registry.sender_locked {
-            locked @ None => *locked = Some(cx.waker().clone()),
-            Some(_) => registry.sender_queue.push_back(cx.waker().clone()),
-        }
+        self.registry().register_send_locked(cx);
+    }
+
+    fn wake_recver(&self, cx: &mut Context<'_>) {
+        self.registry().wake_recver(cx)
     }
 
     fn wake_sender(&self) -> bool {
-        let mut registry = self.registry();
-        if let Some(waker) = registry.sender_locked.take() {
-            waker.wake();
-            true
-        } else {
-            registry.sender_queue.pop_front().map(Waker::wake).is_some()
-        }
+        self.registry().wake_sender()
     }
 }
 
 struct Entry {
     waker: Waker,
     fd_count: fn(u16) -> Option<usize>,
+}
+
+impl<Dir> Registry<Dir> {
+    #[instrument(level = "trace", skip_all)]
+    fn register_recv<I>(&mut self, obj: object<I>, cx: &mut Context<'_>)
+    where
+        I: Interface,
+        Dir: InterfaceDir<I>,
+    {
+        match self.receiver_map.entry(obj.cast::<()>()) {
+            btree_map::Entry::Vacant(vacant_entry) => {
+                trace!(id = obj.id, "register new recv");
+                vacant_entry.insert(Entry {
+                    waker: cx.waker().clone(),
+                    fd_count: <Dir as InterfaceDir<I>>::recv_fd_count,
+                });
+            }
+            btree_map::Entry::Occupied(occupied_entry) => {
+                trace!(id = obj.id, "reregister old recv");
+                occupied_entry.into_mut().waker.clone_from(cx.waker());
+            }
+        }
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn register_send(&mut self, cx: &mut Context<'_>) {
+        self.sender_queue.push_back(cx.waker().clone());
+    }
+
+    fn register_send_locked(&mut self, cx: &mut Context<'_>) {
+        match &mut self.sender_locked {
+            locked @ None => *locked = Some(cx.waker().clone()),
+            Some(_) => self.sender_queue.push_back(cx.waker().clone()),
+        }
+    }
+
+    fn wake_sender(&mut self) -> bool {
+        if let Some(waker) = self.sender_locked.take() {
+            waker.wake();
+            true
+        } else {
+            self.sender_queue.pop_front().map(Waker::wake).is_some()
+        }
+    }
+
+    fn wake_recver(&mut self, cx: &mut Context<'_>) {
+        if let Some(waker) = self.sender_locked.take() {
+            waker.wake();
+        }
+
+        if let Some(waker) = self.receiver_map.first_entry() {
+            let waker = &waker.get().waker;
+            if !waker.will_wake(cx.waker()) {
+                waker.wake_by_ref();
+            }
+        }
+    }
 }
