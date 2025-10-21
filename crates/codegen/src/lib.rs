@@ -1,7 +1,5 @@
 use crate::config::{read_xml_to_protocol, write_tokens_to_file};
-use proc_macro2::Span;
-use std::env;
-use syn::LitStr;
+use std::path::Path;
 
 mod config;
 mod generate;
@@ -10,21 +8,14 @@ mod generate;
 //     parse_macro_input!(stream as GenerateConfig).into_token_stream()
 // }
 
-pub fn protocol(protocol: &str, outfile: &str, formatted: bool) {
-    fn inner(protocol: &str, outfile: &str, formatted: bool) -> syn::Result<()> {
-        let protocol = read_xml_to_protocol(".", &LitStr::new(protocol, Span::call_site()))?;
-
-        write_tokens_to_file(
-            protocol,
-            env::var_os("OUT_DIR").unwrap(),
-            &LitStr::new(outfile, Span::call_site()),
-            formatted,
-        )?;
+pub fn protocol(protocol: impl AsRef<Path>, outfile: impl AsRef<Path>, formatted: bool) {
+    fn inner(infile: &Path, outfile: &Path, formatted: bool) -> syn::Result<()> {
+        write_tokens_to_file(read_xml_to_protocol(infile)?, outfile, formatted)?;
 
         Ok(())
     }
 
-    match inner(protocol, outfile, formatted) {
+    match inner(protocol.as_ref(), outfile.as_ref(), formatted) {
         Ok(()) => {}
         Err(err) => {
             println!("cargo::error={err}")

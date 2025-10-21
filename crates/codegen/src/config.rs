@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
 use crate::generate::generate_protocol;
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::{
-    env,
     fs::{File, read_to_string},
     io::Write,
     path::{Path, PathBuf},
@@ -66,23 +65,24 @@ mod verbs {
 
 impl Parse for GenerateConfig {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let workspace = &env::var("CARGO_WORKSPACE_DIR")
-            .map_err(|_| input.error("Expected `CARGO_WORKSPACE_DIR` to be set and valid"))?;
-
         let verb = input.parse()?;
 
         match verb {
             Verb::Include { xml, out } => {
-                let protocol = read_xml_to_protocol(workspace, &xml)?;
-                let path = write_tokens_to_file(protocol, workspace, &out, true)?;
-                Ok(Self::Include { path, token: out })
+                let protocol = read_xml_to_protocol(Path::new(xml.value().as_str()))?;
+                write_tokens_to_file(protocol, Path::new(out.value().as_str()), true)?;
+
+                Ok(Self::Include {
+                    path: PathBuf::new(), // TODO
+                    token: out,
+                })
             }
             Verb::Generate { xml, out } => {
-                let protocol = read_xml_to_protocol(workspace, &xml)?;
+                let protocol = read_xml_to_protocol(Path::new(xml.value().as_str()))?;
                 match out {
                     None => Ok(Self::Inline { protocol }),
                     Some(out) => {
-                        write_tokens_to_file(protocol, workspace, &out, false)?;
+                        write_tokens_to_file(protocol, Path::new(out.value().as_str()), false)?;
                         Ok(Self::None)
                     }
                 }
@@ -118,14 +118,12 @@ impl ToTokens for GenerateConfig {
     }
 }
 
-pub(crate) fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result<Protocol> {
-    let path = relative_path(workspace, xml.value());
-
+pub(crate) fn read_xml_to_protocol(path: &Path) -> syn::Result<Protocol> {
     wayland_scanner_lib::parse::try_parse(
-        read_to_string(&path)
+        read_to_string(path)
             .map_err(|err| {
                 syn::Error::new(
-                    xml.span(),
+                    Span::call_site(),
                     format!(
                         "failed to read file {path} with {err}",
                         path = path.display()
@@ -136,7 +134,7 @@ pub(crate) fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result
     )
     .map_err(|err| {
         syn::Error::new(
-            xml.span(),
+            Span::call_site(),
             format!(
                 "failed to parse xml {path} with {err}",
                 path = path.display()
@@ -147,11 +145,9 @@ pub(crate) fn read_xml_to_protocol(workspace: &str, xml: &LitStr) -> syn::Result
 
 pub(crate) fn write_tokens_to_file(
     protocol: Protocol,
-    base_dir: impl AsRef<Path>,
-    out: &LitStr,
+    path: &Path,
     formatted: bool,
-) -> syn::Result<PathBuf> {
-    let path = relative_path(base_dir, out.value());
+) -> syn::Result<()> {
     let mut content = {
         let mut tokens = TokenStream::new();
         tokens.append_all(generate_protocol(&protocol));
@@ -165,19 +161,19 @@ pub(crate) fn write_tokens_to_file(
             Err(err) => {
                 // std::fmt::Write::write_fmt(&mut content, format_args!("{err:?}")).unwrap();
                 res = Err(syn::Error::new(
-                    out.span(),
+                    Span::call_site(),
                     format!("failed to reparse file for formatting: {err}"),
                 ))
             }
         }
     }
 
-    File::create(&path)
+    File::create(path)
         .unwrap()
         .write_all(content.as_bytes())
         .unwrap();
 
-    res.map(|()| path)
+    res
 }
 
 fn relative_path(base_dir: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
