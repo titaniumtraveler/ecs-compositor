@@ -1,5 +1,4 @@
-use crate::connection::msg_io::{Msg, cmsg_cursor::CmsgCursor};
-use anyhow::{Result, anyhow};
+use crate::msg_io::{Msg, cmsg_cursor::CmsgCursor};
 use bitflags::bitflags;
 use ecs_compositor_core::{Message, RawSliceExt, Value, message_header, object};
 use libc::{CMSG_SPACE, EWOULDBLOCK, MSG_DONTWAIT, SCM_RIGHTS, SOL_SOCKET, cmsghdr};
@@ -18,7 +17,7 @@ use tokio::io::{Ready, unix::AsyncFdReadyGuard};
 use tracing::{instrument, trace, warn};
 
 #[derive(Debug)]
-pub struct Io {
+pub(crate) struct Io {
     pub(crate) tx: BufDir,
     pub(crate) rx: BufDir,
 
@@ -74,16 +73,16 @@ fn io_ready(guard: &AsyncFdReadyGuard<UnixStream>) -> Interest {
 }
 
 impl Io {
-    pub fn new() -> anyhow::Result<Self> {
-        Ok(Io {
-            tx: BufDir::new()?,
-            rx: BufDir::new()?,
+    pub fn new() -> Self {
+        Io {
+            tx: BufDir::new(),
+            rx: BufDir::new(),
 
             rx_hdr: None,
             cmsg_buf: [0; _],
 
             interest: Interest::RECV,
-        })
+        }
     }
 
     pub fn query_interest(&self) -> Option<tokio::io::Interest> {
@@ -465,12 +464,12 @@ pub struct BufDir {
 }
 
 impl BufDir {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Self {
         unsafe {
-            let da = RingBuf::new(Layout::from_size_align_unchecked(MAX_DATA, 1), MAX_DATA)?;
-            let fd = RingBuf::new(Layout::new::<RawFd>(), 1024)?;
+            let da = RingBuf::new(Layout::from_size_align_unchecked(MAX_DATA, 1), MAX_DATA);
+            let fd = RingBuf::new(Layout::new::<RawFd>(), 1024);
 
-            Ok(Self { da, fd })
+            Self { da, fd }
         }
     }
 
@@ -544,18 +543,18 @@ impl<T> RingBuf<T> {
     /// - The layouts alignment must be sufficient for `T`
     ///   `align_of::<T>() <= layout.align()`
     /// - `<*mut T>.add(len)` has to point to the end of the buffer
-    unsafe fn new(layout: Layout, len: usize) -> Result<RingBuf<T>> {
+    unsafe fn new(layout: Layout, len: usize) -> RingBuf<T> {
         unsafe {
             let alloc = slice_from_raw_parts_mut(alloc::alloc(layout).cast(), len);
 
             if alloc.is_null() {
-                return Err(anyhow!("alloc failed {alloc:p}"));
+                panic!("alloc failed {alloc:p}");
             }
 
-            Ok(Self {
+            Self {
                 buf: alloc,
                 data: slice_from_raw_parts_mut(alloc.cast(), 0),
-            })
+            }
         }
     }
 

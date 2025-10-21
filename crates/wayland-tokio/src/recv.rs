@@ -1,12 +1,16 @@
-use crate::connection::{Connection, InterfaceDir, Io, Object, ready_fut::DriveIo};
+use crate::{
+    connection::{Connection, Object},
+    dir::InterfaceDir,
+    drive_io::Io,
+    ready_fut::DriveIo,
+};
 use ecs_compositor_core::{Interface, Message, Opcode, Value, message_header};
-use std::fmt::{self, Debug};
-use std::os::fd::AsRawFd;
 use std::{
+    fmt::{self, Debug},
     future::Future,
     io,
     marker::PhantomData,
-    os::fd::RawFd,
+    os::fd::{AsRawFd, RawFd},
     pin::Pin,
     sync::MutexGuard,
     task::{Context, Poll, ready},
@@ -29,7 +33,7 @@ where
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Recv<'a, Conn, I, Dir, Fut>
+pub(crate) struct Recv<'a, Conn, I, Dir, Fut>
 where
     Conn: AsRef<Connection<Dir>>,
     I: Interface,
@@ -59,7 +63,7 @@ where
     }
 
     fn fd(&self) -> RawFd {
-        self.obj.conn.as_ref().fd.as_raw_fd()
+        self.obj.conn().fd.as_raw_fd()
     }
 }
 

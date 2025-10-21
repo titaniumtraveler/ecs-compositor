@@ -1,4 +1,8 @@
-use crate::connection::{Connection, InterfaceDir, Io, Object};
+use crate::{
+    connection::{Connection, Object},
+    dir::InterfaceDir,
+    drive_io::Io,
+};
 use ecs_compositor_core::Interface;
 use std::{
     future::Future,
@@ -26,7 +30,7 @@ where
                 async |interest| {
                     // tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     trace!(?interest, "ready");
-                    self.conn.as_ref().fd.ready(interest).await
+                    self.conn().fd.ready(interest).await
                 }
             },
             fut: None,
@@ -42,8 +46,9 @@ pub struct AsyncIo<'a, F, Fut> {
     _marker: PhantomData<&'a AsyncFd<UnixStream>>,
 }
 
+#[doc(hidden)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub trait DriveIo {
+pub(crate) trait DriveIo {
     fn poll_with_io(
         self: Pin<&mut Self>,
         io: &mut Io,

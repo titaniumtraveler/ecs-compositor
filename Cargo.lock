@@ -24,6 +24,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
+name = "apps"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "console-subscriber",
+ "ecs-compositor-codegen",
+ "ecs-compositor-core",
+ "ecs-compositor-tokio",
+ "libc",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -541,6 +556,18 @@ name = "ecs-compositor-message"
 version = "0.1.0"
 dependencies = [
  "bitvec",
+]
+
+[[package]]
+name = "ecs-compositor-tokio"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "bstr",
+ "ecs-compositor-core",
+ "libc",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1869,22 +1896,6 @@ dependencies = [
  "quick-xml",
  "quote",
  "similar",
-]
-
-[[package]]
-name = "wayland-tokio"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitflags",
- "bstr",
- "console-subscriber",
- "ecs-compositor-codegen",
- "ecs-compositor-core",
- "libc",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

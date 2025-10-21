@@ -1,6 +1,18 @@
-use crate::connection::{Connection, InterfaceDir, Io, Object, ready_fut::DriveIo};
+use crate::{
+    connection::{Connection, Object},
+    dir::InterfaceDir,
+    drive_io::Io,
+    ready_fut::DriveIo,
+};
 use ecs_compositor_core::{Interface, Message};
-use std::{fmt::Display, future::Future, io, os::fd::{AsRawFd, RawFd}, pin::Pin, task::{ready, Context, Poll}};
+use std::{
+    fmt::Display,
+    future::Future,
+    io,
+    os::fd::{AsRawFd, RawFd},
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 use tracing::instrument;
 
 impl<Conn, I, Dir> Object<Conn, I, Dir>
@@ -25,7 +37,7 @@ where
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Send<'a, Conn, I, Dir, Msg, Fut>
+pub(crate) struct Send<'a, Conn, I, Dir, Msg, Fut>
 where
     Conn: AsRef<Connection<Dir>>,
     I: Interface,
