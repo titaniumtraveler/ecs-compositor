@@ -236,6 +236,7 @@ pub struct WaylandHeader {
 }
 
 impl Value<'_> for WaylandHeader {
+    const FDS: usize = 0;
     fn len(&self) -> u32 {
         4 + 2 + 2
     }
