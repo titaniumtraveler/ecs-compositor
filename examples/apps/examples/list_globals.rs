@@ -1,11 +1,13 @@
-use apps::protocols::wayland::{wl_display, wl_registry};
 use ecs_compositor_tokio::{
     connection::{ClientHandle, Connection},
-    dir::Client,
+    handle::Client,
     new_id,
 };
+use protocols::wayland::{wl_display, wl_registry};
 use std::sync::Arc;
 use tracing::{info, instrument};
+
+apps::protocols!();
 
 #[tokio::main]
 async fn main() {
