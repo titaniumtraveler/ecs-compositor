@@ -188,7 +188,7 @@ impl Debug for msg_debug<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::connection::msg_io::{Msg, cmsg_cursor::CmsgCursor};
+    use crate::msg_io::{Msg, cmsg_cursor::CmsgCursor};
     use libc::{AF_UNIX, CMSG_SPACE, SCM_RIGHTS, SOCK_STREAM, SOL_SOCKET, cmsghdr, socketpair};
     use std::{
         io::{stdin, stdout},
