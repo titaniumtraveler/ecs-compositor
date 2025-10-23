@@ -3,7 +3,13 @@ use crate::{
     primitives::{Result, Value, align},
     wl_display::enumeration::error,
 };
-use std::{marker::PhantomData, num::NonZero, os::unix::prelude::RawFd, ptr::NonNull};
+use std::{
+    marker::PhantomData,
+    num::NonZero,
+    os::unix::prelude::RawFd,
+    ptr::{NonNull, slice_from_raw_parts},
+    str::Utf8Error,
+};
 
 /// Starts with 32-bit array size in bytes, followed by the array contents verbatim, and finally
 /// padding to a 32-bit boundary.
@@ -17,6 +23,9 @@ pub struct array<'a> {
     pub len: u32,
     pub _marker: PhantomData<&'a [u8]>,
 }
+
+unsafe impl<'a> Send for array<'a> {}
+unsafe impl<'a> Sync for array<'a> {}
 
 impl<'data> Value<'data> for array<'data> {
     const FDS: usize = 0;
@@ -51,6 +60,36 @@ pub struct string<'a> {
     pub ptr: Option<NonNull<u8>>,
     pub len: NonZero<u32>,
     pub _marker: PhantomData<&'a [u8]>,
+}
+
+unsafe impl<'a> Send for string<'a> {}
+unsafe impl<'a> Sync for string<'a> {}
+
+impl<'a> string<'a> {
+    pub fn as_slice(&self) -> &[u8] {
+        match self.ptr {
+            None => &[],
+            Some(ptr) => unsafe { &*slice_from_raw_parts(ptr.as_ptr(), self.len.get() as usize) },
+        }
+    }
+    pub fn as_slice_without_trailing_null(&self) -> &[u8] {
+        let slice = self.as_slice();
+        if let Some(b'\0') = slice.last() {
+            &slice[..(slice.len() - 1)]
+        } else {
+            slice
+        }
+    }
+    pub fn as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
+        std::str::from_utf8(self.as_slice_without_trailing_null())
+    }
+    pub fn from_slice<'data>(slice: &'data [u8]) -> string<'data> {
+        string {
+            ptr: NonNull::new(slice.as_ptr().cast_mut()),
+            len: NonZero::new(slice.len() as u32).expect("slice shouldn't be empty"),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<'data> Value<'data> for string<'data> {

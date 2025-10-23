@@ -85,7 +85,7 @@ impl Io {
         }
     }
 
-    pub fn query_interest(&self) -> Option<tokio::io::Interest> {
+    pub fn query_interest(&mut self) -> Option<tokio::io::Interest> {
         match self.interest {
             interest if interest.contains(Interest::RECV | Interest::SEND) => {
                 Some(tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE)
@@ -100,6 +100,15 @@ impl Io {
     pub fn drive_io(&mut self, guard: &mut AsyncFdReadyGuard<UnixStream>) -> io::Result<()> {
         let ready = guard.ready();
 
+        if ready.is_read_closed() {
+            self.interest |= Interest::RECV_CLOSED;
+        }
+
+        if ready.is_write_closed() {
+            self.interest.insert(Interest::SEND_CLOSED);
+            self.interest.remove(Interest::SEND);
+        }
+
         let mut reading = self.interest.contains(Interest::RECV) && ready.is_readable();
         let mut writing = self.interest.contains(Interest::SEND) && ready.is_writable();
 
@@ -109,12 +118,12 @@ impl Io {
                 break;
             }
 
-            if reading {
-                reading = self.recv(guard)?;
-            }
-
             if writing {
                 writing = self.send(guard)?;
+            }
+
+            if reading {
+                reading = self.recv(guard)?;
             }
 
             count += 1;
@@ -367,7 +376,7 @@ impl Io {
         }
     }
 
-    #[instrument(name = "tx buf write", level = "trace", ret, skip_all)]
+    #[instrument(level = "trace", ret, skip_all)]
     pub fn tx_msg_buf<'a, M>(
         &mut self,
         object_id: object<M::Interface>,
@@ -422,7 +431,7 @@ impl Io {
         }
     }
 
-    #[instrument(name = "rx buf write read", level = "trace", fields(data_len = da, ctrl_len = fd), ret, skip_all)]
+    #[instrument(level = "trace", fields(data_len = da, ctrl_len = fd), ret, skip_all)]
     pub fn rx_msg_buf(&mut self, (da, fd): (u16, usize)) -> Option<(IoBuf, IoBuf)> {
         unsafe {
             let rx = &mut self.rx;
@@ -458,9 +467,9 @@ impl Io {
 }
 
 #[derive(Debug)]
-pub struct BufDir {
-    da: RingBuf<u8>,
-    fd: RingBuf<RawFd>,
+pub(crate) struct BufDir {
+    pub(crate) da: RingBuf<u8>,
+    pub(crate) fd: RingBuf<RawFd>,
 }
 
 impl BufDir {
@@ -495,14 +504,14 @@ impl BufDir {
 }
 
 #[derive(Debug)]
-pub struct IoBuf {
+pub(crate) struct IoBuf {
     pub da: *mut [u8],
     pub fd: *mut [RawFd],
 }
 
-pub struct RingBuf<T> {
-    buf: *mut [T],
-    data: *mut [T],
+pub(crate) struct RingBuf<T> {
+    pub(crate) buf: *mut [T],
+    pub(crate) data: *mut [T],
 }
 
 unsafe impl<T: std::marker::Send> std::marker::Send for RingBuf<T> {}

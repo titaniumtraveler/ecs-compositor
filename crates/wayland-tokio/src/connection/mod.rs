@@ -1,4 +1,7 @@
-use crate::{dir::Client, drive_io::Io};
+use crate::{
+    drive_io::Io,
+    handle::{Client, ConnectionHandle},
+};
 use ecs_compositor_core::{Interface, new_id, new_id_dyn, object, string, uint};
 use std::{
     env, io,
@@ -14,7 +17,13 @@ use std::{
 };
 use tokio::io::unix::AsyncFd;
 
+pub use self::{ready_fut::DriveIo, recv::Recv, send::Send};
+
+pub mod recv;
+pub mod send;
+
 mod obj;
+mod ready_fut;
 mod registry;
 
 pub use self::obj::Object;
@@ -59,10 +68,10 @@ impl<Dir> AsRawFd for Connection<Dir> {
     }
 }
 
-pub trait ClientHandle: AsRef<Connection<Client>> + Clone {
+pub trait ClientHandle: ConnectionHandle<Dir = Client> {
     /// # Panic
     /// Does panic if `id` is `0`.
-    fn new_object_with_id<I>(&self, id: u32) -> Object<Self, I, Client>
+    fn new_object_with_id<I>(&self, id: u32) -> Object<Self, I>
     where
         I: Interface,
     {
@@ -72,23 +81,22 @@ pub trait ClientHandle: AsRef<Connection<Client>> + Clone {
                 id: NonZero::new(id).unwrap(),
                 _marker: PhantomData,
             },
-            marker: PhantomData,
         }
     }
 
-    fn new_object<I>(&self) -> (new_id<I>, Object<Self, I, Client>)
+    fn new_object<I>(&self) -> (new_id<I>, Object<Self, I>)
     where
         I: Interface,
     {
-        let obj = self.as_ref().registry().new_object(self.clone());
+        let obj = self.conn().registry().new_object(self.clone());
         (obj.id.to_new_id(), obj)
     }
 
-    fn new_object_dyn<I>(&self) -> (new_id_dyn<'static>, Object<Self, I, Client>)
+    fn new_object_dyn<I>(&self) -> (new_id_dyn<'static>, Object<Self, I>)
     where
         I: Interface,
     {
-        let obj = self.as_ref().registry().new_object(self.clone());
+        let obj = self.conn().registry().new_object(self.clone());
         (
             new_id_dyn {
                 name: string {
@@ -104,7 +112,7 @@ pub trait ClientHandle: AsRef<Connection<Client>> + Clone {
     }
 }
 
-impl<Conn: AsRef<Connection<Client>> + Clone> ClientHandle for Conn {}
+impl<Conn: ConnectionHandle<Dir = Client>> ClientHandle for Conn {}
 
 impl<Dir> AsRef<Connection<Dir>> for &Connection<Dir> {
     fn as_ref(&self) -> Self {

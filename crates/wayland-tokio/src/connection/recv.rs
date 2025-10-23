@@ -1,12 +1,11 @@
 use crate::{
-    connection::{Connection, Object},
-    dir::InterfaceDir,
+    connection::{DriveIo, Object},
     drive_io::Io,
-    ready_fut::DriveIo,
+    handle::{ConnectionHandle, InterfaceDir},
 };
 use ecs_compositor_core::{Interface, Message, Opcode, Value, message_header};
 use std::{
-    fmt::{self, Debug},
+    fmt::{self, Debug, Display},
     future::Future,
     io,
     marker::PhantomData,
@@ -17,38 +16,34 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
-impl<Conn, I, Dir> Object<Conn, I, Dir>
+impl<Conn, I> Object<Conn, I>
 where
-    Conn: AsRef<Connection<Dir>>,
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
     I: Interface,
-    Dir: InterfaceDir<I>,
 {
-    pub async fn recv<'a>(&'a self) -> io::Result<MsgBuf<'a, Dir, I>> {
+    pub fn recv(&self) -> Recv<'_, Conn, I, impl DriveIo> {
         Recv {
             obj: self,
-            drive_io: self.drive_io(),
+            drive_io: self.conn().drive_io(),
         }
-        .await
     }
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub(crate) struct Recv<'a, Conn, I, Dir, Fut>
+pub struct Recv<'a, Conn, I, Fut>
 where
-    Conn: AsRef<Connection<Dir>>,
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
     I: Interface,
-    Dir: InterfaceDir<I>,
     Fut: DriveIo,
 {
-    obj: &'a Object<Conn, I, Dir>,
+    obj: &'a Object<Conn, I>,
     drive_io: Fut,
 }
 
-impl<'a, Conn, I, Dir, Fut> Recv<'a, Conn, I, Dir, Fut>
+impl<'a, Conn, I, Fut> Recv<'a, Conn, I, Fut>
 where
-    Conn: AsRef<Connection<Dir>>,
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
     I: Interface,
-    Dir: InterfaceDir<I>,
     Fut: DriveIo,
 {
     fn drive_io(
@@ -67,19 +62,19 @@ where
     }
 }
 
-impl<'a, Conn, I, Dir, Fut> Future for Recv<'a, Conn, I, Dir, Fut>
+impl<'a, Conn, I, Fut> Future for Recv<'a, Conn, I, Fut>
 where
-    Conn: AsRef<Connection<Dir>>,
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
     I: Interface,
-    Dir: InterfaceDir<I>,
     Fut: DriveIo,
+    <Conn::Dir as InterfaceDir<I>>::Recv: Display,
 {
-    type Output = io::Result<MsgBuf<'a, Dir, I>>;
+    type Output = io::Result<MsgBuf<'a, Conn::Dir, I>>;
     #[instrument(name = "poll_recv", level = "trace", fields(fd = self.fd(), id = self.obj.id.id, interface = I::NAME), skip_all)]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         unsafe {
             let obj = self.obj;
-            let conn = self.obj.conn.as_ref();
+            let conn = self.obj.conn();
 
             let mut io = match conn.try_lock_io_buf() {
                 Some(io) => io,
@@ -91,11 +86,15 @@ where
                 }
             };
 
+            let mut count = 0;
             let (hdr, (_, buf)) = loop {
-                trace!("loop");
+                trace!(count, "loop");
+                count += 1;
+
                 match io.rx_hdr {
                     None => {
                         let Some((_, buf)) = io.rx_msg_buf(message_header::COMBINED_LEN) else {
+                            trace!("drive_io for header");
                             ready!(self.drive_io(&mut io, cx))?;
                             continue;
                         };
@@ -115,7 +114,7 @@ where
                         if obj.id.id() == hdr.object_id.id() {
                             let size = (
                                 hdr.content_len(),
-                                Dir::Recv::from_u16(hdr.opcode)
+                                <Conn::Dir as InterfaceDir<I>>::Recv::from_u16(hdr.opcode)
                                     .map_err(|opcode| {
                                         format!(
                                             "invalid opcode {opcode} for ({name}@{version}) with id {id}",
@@ -134,6 +133,7 @@ where
                                     break (hdr, data);
                                 }
                                 None => {
+                                    trace!("drive_io for ourself");
                                     ready!(self.drive_io(&mut io, cx))?;
                                     continue;
                                 }
@@ -155,7 +155,11 @@ where
                             );
                             match io.rx_msg_buf(size) {
                                 Some((cursor, _)) => {
-                                    trace!(return = ?Poll::<()>::Pending, id = hdr.object_id.id(), "dispatching to object");
+                                    trace!(
+                                        from = %obj.id(),
+                                        to = %hdr.object_id,
+                                        "dispatching to object"
+                                    );
 
                                     io.rx.restore_cursor(cursor);
                                     drop(io);
@@ -166,6 +170,7 @@ where
                                     return Poll::Pending;
                                 }
                                 None => {
+                                    trace!(id = hdr.object_id.id().get(), "drive_io for other");
                                     ready!(self.drive_io(&mut io, cx))?;
                                     continue;
                                 }
@@ -185,8 +190,10 @@ where
                 }
             };
 
+            obj.register_recv(cx);
             obj.wake_recver(cx);
 
+            trace!(id = %obj.id(), opcode = hdr.opcode, kind = %MsgKind::<Conn, I>::new(hdr.opcode), hdr = ?hdr, "recv");
             Poll::Ready(Ok(MsgBuf {
                 _io: io,
                 hdr,
@@ -194,6 +201,36 @@ where
                 fd: buf.fd,
                 dir: PhantomData,
             }))
+        }
+    }
+}
+
+struct MsgKind<Conn, I>(u16, PhantomData<(Conn, I)>)
+where
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
+    I: Interface;
+
+impl<Conn, I> MsgKind<Conn, I>
+where
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
+    I: Interface,
+{
+    fn new(opcode: u16) -> Self {
+        Self(opcode, PhantomData)
+    }
+}
+
+impl<Conn, I> Display for MsgKind<Conn, I>
+where
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
+    I: Interface,
+    <Conn::Dir as InterfaceDir<I>>::Recv: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let iface = I::NAME;
+        match <Conn::Dir as InterfaceDir<I>>::Recv::from_u16(self.0) {
+            Ok(msg) => write!(f, "{iface}.{msg}#{opcode}", opcode = self.0,),
+            Err(u16) => write!(f, "{iface}.<unknown>#{u16}"),
         }
     }
 }
@@ -241,4 +278,6 @@ where
 
         unsafe { M::read(&mut da, &mut fd) }
     }
+
+    pub fn ignore_message(self) {}
 }

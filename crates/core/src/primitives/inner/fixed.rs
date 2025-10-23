@@ -12,6 +12,7 @@ use std::os::unix::prelude::RawFd;
 /// as an opaque struct with methods that facilitate conversion to and from
 /// [`f64`] and [`i32`] types.
 #[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
 pub struct fixed(pub i32);
 
 impl fixed {

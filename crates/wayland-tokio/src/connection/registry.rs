@@ -1,6 +1,6 @@
 use crate::{
     connection::{Client, Connection, Object},
-    dir::InterfaceDir,
+    handle::{ConnectionHandle, InterfaceDir},
 };
 use ecs_compositor_core::{Interface, object};
 use std::{
@@ -38,9 +38,9 @@ impl<Dir> Registry<Dir> {
 }
 
 impl Registry<Client> {
-    pub(crate) fn new_object<Conn, I>(&mut self, conn: Conn) -> Object<Conn, I, Client>
+    pub(crate) fn new_object<Conn, I>(&mut self, conn: Conn) -> Object<Conn, I>
     where
-        Conn: AsRef<Connection<Client>>,
+        Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
         I: Interface,
     {
         Object {
@@ -53,7 +53,6 @@ impl Registry<Client> {
                     _marker: PhantomData,
                 }
             },
-            marker: PhantomData,
         }
     }
 }
@@ -81,18 +80,18 @@ impl<Dir> Registry<Dir> {
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn register_send(&mut self, cx: &mut Context<'_>) {
+    pub(crate) fn register_send(&mut self, cx: &mut Context<'_>) {
         self.sender_queue.push_back(cx.waker().clone());
     }
 
-    fn register_send_locked(&mut self, cx: &mut Context<'_>) {
+    pub(crate) fn register_send_locked(&mut self, cx: &mut Context<'_>) {
         match &mut self.sender_locked {
             locked @ None => *locked = Some(cx.waker().clone()),
             Some(_) => self.sender_queue.push_back(cx.waker().clone()),
         }
     }
 
-    fn wake_sender(&mut self) -> bool {
+    pub(crate) fn wake_sender(&mut self) -> bool {
         if let Some(waker) = self.sender_locked.take() {
             waker.wake();
             true
@@ -115,18 +114,17 @@ impl<Dir> Registry<Dir> {
     }
 }
 
-impl<Conn, I, Dir> Object<Conn, I, Dir>
+impl<Conn, I, > Object<Conn, I>
 where
-    Conn: AsRef<Connection<Dir>>,
+    Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
     I: Interface,
-    Dir: InterfaceDir<I>,
 {
-    pub(crate) fn conn(&self) -> &Connection<Dir> {
-        self.conn.as_ref()
+    pub fn conn(&self) -> &Connection<<Conn as ConnectionHandle>::Dir>  {
+        self.conn.conn()
     }
 
-    pub(crate) fn registry(&self) -> MutexGuard<'_, Registry<Dir>> {
-        self.conn.as_ref().registry.lock().unwrap()
+    pub(crate) fn registry(&self) -> MutexGuard<'_, Registry<<Conn as ConnectionHandle>::Dir>> {
+        self.conn().registry.lock().unwrap()
     }
 
     pub(crate) fn register_recv(&self, cx: &mut Context<'_>) {

@@ -133,6 +133,9 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
         quote! { #i => Ok(Self::#name), }
     });
 
+    let fields_ident = messages.iter().map(|msg| self::typ_name(&msg.name));
+    let fields_str = messages.iter().map(|msg| &msg.name);
+
     let fd_count = {
         if !messages.is_empty() {
             let fd_count = messages.iter().map(|msg| {
@@ -181,6 +184,14 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
 
             fn fd_count(&self) -> usize {
                 #fd_count
+            }
+        }
+
+        impl std::fmt::Display for Opcodes {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match *self {
+                    #(Self::#fields_ident => f.write_str(#fields_str),)*
+                }
             }
         }
     }
