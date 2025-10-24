@@ -5,7 +5,7 @@ use ecs_compositor_tokio::{
     handle::Client,
     new_id,
 };
-use libc::{MFD_CLOEXEC, SEEK_SET};
+use libc::{MAP_SHARED, MFD_CLOEXEC, PROT_READ, PROT_WRITE};
 use protocols::{
     wayland::{wl_display, wl_output, wl_registry},
     wlr::wlr_gamma_control_unstable_v1::{
@@ -13,9 +13,9 @@ use protocols::{
     },
 };
 use std::{
-    io::{self, PipeWriter, Write},
-    mem::MaybeUninit,
-    os::fd::{FromRawFd, IntoRawFd, RawFd},
+    io::{self},
+    os::fd::RawFd,
+    ptr::null_mut,
     sync::Arc,
 };
 use tracing::{error, info, instrument};
@@ -227,79 +227,51 @@ async fn handle_output(
 
 fn create_gamma_table(size: u32, brightness: f32) -> io::Result<RawFd> {
     unsafe {
+        let table_size = size as usize * size_of::<[u16; 3]>();
+
         let gamma_fd = libc::memfd_create(c"".as_ptr(), MFD_CLOEXEC);
         if gamma_fd < 0 {
             error!("gamma fd error");
             return Err(io::Error::last_os_error());
         }
-        let mut data = vec![0u16; size as usize * 3];
 
-        #[allow(irrefutable_let_patterns)]
-        if let ret = libc::ftruncate(gamma_fd, data.len() as i64)
-            && ret < 0
-        {
+        let ret = libc::ftruncate(gamma_fd, table_size as i64);
+        if ret < 0 {
             error!("failed truncate");
             return Err(io::Error::last_os_error());
         }
-        info!(
-            size = size as usize * size_of::<[u16; 3]>(),
-            "ftruncated to size"
+
+        let data = libc::mmap(
+            null_mut(),
+            table_size,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            gamma_fd,
+            0,
         );
+        if data.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+
+        let data = data.cast::<u16>();
 
         #[allow(clippy::identity_op, clippy::erasing_op)]
         for i in 0..size {
-            let mut val = i as f32 / (size - 1) as f32;
+            let brightness = 0x8000;
+            let max_brightness: u32 = (1 << 16) - 1;
 
-            val = std::cmp::min_by(val.powf(0.9) * brightness, val, f32::total_cmp);
-            val = val.clamp(0.0, 1.0);
-            let val = (val * u16::MAX as f32) as u16;
+            let val = ((max_brightness * brightness) >> 16) / size * i;
+            let val: u16 = val as u16;
 
             let size = size as usize;
             let i = i as usize;
 
-            data[size * 0 + i] = val;
-            data[size * 1 + i] = val;
-            data[size * 2 + i] = val;
+            data.add(size * 0 + i).write(val);
+            data.add(size * 1 + i).write(val);
+            data.add(size * 2 + i).write(val);
         }
 
-        let mut file = PipeWriter::from_raw_fd(gamma_fd);
-        let (prefix, data, postfix) = data.as_slice().align_to::<u8>();
-        assert!(prefix.is_empty());
-        assert!(postfix.is_empty());
-        file.write_all(data)?;
-
-        let mut s: MaybeUninit<libc::stat> = MaybeUninit::zeroed();
-        let ret = libc::fstat(gamma_fd, s.as_mut_ptr());
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let s = s.assume_init();
-        info!(
-            st_dev = s.st_dev,
-            st_ino = s.st_ino,
-            st_nlink = s.st_nlink,
-            st_mode = s.st_mode,
-            st_uid = s.st_uid,
-            st_gid = s.st_gid,
-            st_rdev = s.st_rdev,
-            st_size = s.st_size,
-            st_blksize = s.st_blksize,
-            st_blocks = s.st_blocks,
-            st_atime = s.st_atime,
-            st_atime_nsec = s.st_atime_nsec,
-            st_mtime = s.st_mtime,
-            st_mtime_nsec = s.st_mtime_nsec,
-            st_ctime = s.st_ctime,
-            st_ctime_nsec = s.st_ctime_nsec,
-            "stat"
-        );
-        let file = file.into_raw_fd();
-        let ret = libc::lseek(file, 0, SEEK_SET);
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(file)
+        Ok(gamma_fd)
     }
 }
 
