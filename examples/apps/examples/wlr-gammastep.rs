@@ -1,5 +1,7 @@
 use anyhow::anyhow;
-use ecs_compositor_core::{Interface, fd, new_id, new_id_dyn, string, uint};
+use ecs_compositor_core::{
+    Interface, Message, RawSliceExt, Value, fd, new_id, primitives::align, uint,
+};
 use ecs_compositor_tokio::{
     connection::{ClientHandle, Connection, Object},
     handle::Client,
@@ -13,12 +15,15 @@ use protocols::{
     },
 };
 use std::{
+    fmt::Display,
     io::{self},
     os::fd::RawFd,
     ptr::null_mut,
     sync::Arc,
 };
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument};
+
+use crate::protocols::wlr::wlr_gamma_control_unstable_v1::zwlr_gamma_control_manager_v1::zwlr_gamma_control_manager_v1;
 
 apps::protocols!();
 
@@ -82,8 +87,8 @@ async fn inner() -> anyhow::Result<()> {
                                 wl_output::wl_output::NAME => {
                                     (e.name, e.version, Interface::Output)
                                 }
-                                _unused => {
-                                    // debug!(interface = unused, "unused global");
+                                unused => {
+                                    debug!(interface = unused, "unused global");
                                     continue;
                                 }
                             }
@@ -93,25 +98,25 @@ async fn inner() -> anyhow::Result<()> {
                 };
                 match kind {
                     Interface::Gamma => {
+                        assert!(zwlr_gamma_control_manager_v1::VERSION <= version.0);
                         let gamma;
-                        let bind = bind::<gamma_manager::zwlr_gamma_control_manager_v1>(
-                            name,
-                            version,
-                            "zwlr_gamma_control_manager_v1\0",
-                            new_id!(conn, gamma),
-                        );
-                        registry.send(&bind).await?;
+                        registry
+                            .send(&bind {
+                                name,
+                                id: new_id!(conn, gamma),
+                            })
+                            .await?;
                         gamma_manager = Some(gamma);
                     }
                     Interface::Output => {
+                        assert!(wl_output::wl_output::VERSION <= version.0);
                         let output;
-                        let bind = bind::<wl_output::wl_output>(
-                            name,
-                            version,
-                            "wl_output\0",
-                            new_id!(conn, output),
-                        );
-                        registry.send(&bind).await?;
+                        registry
+                            .send(&bind {
+                                name,
+                                id: new_id!(conn, output),
+                            })
+                            .await?;
 
                         let gamma_control;
                         gamma_manager
@@ -275,28 +280,90 @@ fn create_gamma_table(size: u32, brightness: f32) -> io::Result<RawFd> {
     }
 }
 
-fn bind<I: Interface>(
+#[allow(non_camel_case_types)]
+struct bind<I: Interface> {
     name: uint,
-    version: uint,
-    interface: &'static str,
-    new_id: new_id<I>,
-) -> wl_registry::request::bind<'static> {
-    info!(
-        name = name.0,
-        version= version.0,
-        interface = interface,
-        new_id= %new_id,
-        "binding global"
-    );
-    assert_eq!(version.0, I::VERSION);
-    wl_registry::request::bind {
-        name,
-        id: new_id_dyn {
-            name: string::from_slice(interface.as_bytes()),
-            version,
-            id: new_id.cast(),
-        },
+    id: new_id<I>,
+}
+
+impl<'data, I: Interface> Value<'data> for bind<I> {
+    const FDS: usize = 0;
+
+    fn len(&self) -> u32 {
+        4 // self.name
+        + 4 + align::<4>(I::NAME.len() as u32 + 1) // Interface::NAME
+        + 4 // Interface::VERSION
+        + 4 // self.id
     }
+
+    unsafe fn read(
+        _data: &mut *const [u8],
+        _fds: &mut *const [RawFd],
+    ) -> ecs_compositor_core::primitives::Result<Self> {
+        unimplemented!()
+    }
+
+    unsafe fn write(
+        &self,
+        data: &mut *mut [u8],
+        fds: &mut *mut [RawFd],
+    ) -> ecs_compositor_core::primitives::Result<()> {
+        unsafe {
+            self.name.write(data, fds)?;
+
+            {
+                // Write the interface string to the buffer.
+                // Because `Interface::NAME` lacks the expected null terminator,
+                // we just pretend we write a string with len+1 to the buffer and then set the
+                // padding (which is there *anyways*) to zero, which makes sure we the string data
+                // is followed by a null byte. (Which has effectively the same impact as if we
+                // wrote a full null terminated string)
+                let str_len = I::NAME.len() as u32 + 1;
+                uint(str_len).write(data, fds)?;
+                let (padding, data) = {
+                    let mut padding = data
+                        .split_at(align::<4>(str_len) as usize)
+                        .expect("not enough space for string");
+                    let data = padding.split_at(I::NAME.len()).unwrap();
+                    (padding, data)
+                };
+
+                data.start()
+                    .copy_from_nonoverlapping(I::NAME.as_ptr(), I::NAME.len());
+                padding.start().write_bytes(0, padding.len());
+            }
+
+            uint(I::VERSION).write(data, fds)?;
+
+            self.id.write(data, fds)?;
+            Ok(())
+        }
+    }
+}
+
+impl<I: Interface> Display for bind<I> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "new_id_dyn{{ name: {}, id: {}, version: {}}}",
+            self.name,
+            self.id,
+            I::VERSION
+        )?;
+        Ok(())
+    }
+}
+
+impl<'data, I: Interface> Message<'data> for bind<I> {
+    type Interface = wl_registry::wl_registry;
+
+    const VERSION: u32 = wl_registry::request::bind::VERSION;
+    const NAME: &'static str = wl_registry::request::bind::NAME;
+
+    type Opcode = <wl_registry::request::bind<'data> as Message<'data>>::Opcode;
+
+    const OPCODE: Self::Opcode = <wl_registry::request::bind<'data> as Message<'data>>::OPCODE;
+    const OP: u16 = <wl_registry::request::bind<'data> as Message<'data>>::OP;
 }
 
 async fn handle_output_event(output: &Object<Conn, wl_output::wl_output>) -> io::Result<()> {
