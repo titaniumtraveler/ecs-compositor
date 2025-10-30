@@ -27,7 +27,7 @@ macro_rules! protocols {
 
             pub use ecs_compositor_core as proto;
 
-            include!(concat!(env!("OUT_DIR"), "/wayland-core.rs"));
+            include!(concat!(env!("OUT_DIR"), "/wayland.rs"));
 
             pub mod wlr {
                 use super::*;

@@ -1,6 +1,9 @@
 use crate::config::{read_xml_to_protocol, write_tokens_to_file};
 use std::path::Path;
 
+pub use self::builder::Wayland;
+
+pub mod builder;
 mod config;
 mod generate;
 
