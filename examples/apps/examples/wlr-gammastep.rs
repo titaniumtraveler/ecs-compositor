@@ -11,19 +11,12 @@ use libc::{MAP_SHARED, MFD_CLOEXEC, PROT_READ, PROT_WRITE};
 use protocols::{
     wayland::{wl_display, wl_output, wl_registry},
     wlr::wlr_gamma_control_unstable_v1::{
-        zwlr_gamma_control_manager_v1 as gamma_manager, zwlr_gamma_control_v1 as gamma_control,
+        zwlr_gamma_control_manager_v1::{self as gamma_manager, zwlr_gamma_control_manager_v1},
+        zwlr_gamma_control_v1 as gamma_control,
     },
 };
-use std::{
-    fmt::Display,
-    io::{self},
-    os::fd::RawFd,
-    ptr::null_mut,
-    sync::Arc,
-};
+use std::{fmt::Display, io, os::fd::RawFd, ptr::null_mut, sync::Arc};
 use tracing::{debug, error, info, instrument};
-
-use crate::protocols::wlr::wlr_gamma_control_unstable_v1::zwlr_gamma_control_manager_v1::zwlr_gamma_control_manager_v1;
 
 apps::protocols!();
 
@@ -230,7 +223,7 @@ async fn handle_output(
     }
 }
 
-fn create_gamma_table(size: u32, brightness: f32) -> io::Result<RawFd> {
+fn create_gamma_table(size: u32, _brightness: f32) -> io::Result<RawFd> {
     unsafe {
         let table_size = size as usize * size_of::<[u16; 3]>();
 
@@ -262,11 +255,10 @@ fn create_gamma_table(size: u32, brightness: f32) -> io::Result<RawFd> {
 
         #[allow(clippy::identity_op, clippy::erasing_op)]
         for i in 0..size {
-            let brightness = 0x8000;
-            let max_brightness: u32 = (1 << 16) - 1;
+            let brightness = 0xA000;
 
-            let val = ((max_brightness * brightness) >> 16) / size * i;
-            let val: u16 = val as u16;
+            let val = brightness * i / size;
+            let val: u16 = std::cmp::min(val, u16::MAX as u32) as u16;
 
             let size = size as usize;
             let i = i as usize;
