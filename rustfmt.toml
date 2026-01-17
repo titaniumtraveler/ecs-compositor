@@ -1,0 +1,4 @@
+use_small_heuristics = "Max"
+single_line_if_else_max_width = 80
+chain_width = 60
+fn_call_width = 60
