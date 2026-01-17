@@ -48,10 +48,7 @@ impl Registry<Client> {
             id: {
                 let next_id = self.next_id;
                 self.next_id = self.next_id.saturating_add(1);
-                object {
-                    id: next_id,
-                    _marker: PhantomData,
-                }
+                object { id: next_id, _marker: PhantomData }
             },
         }
     }
@@ -114,12 +111,12 @@ impl<Dir> Registry<Dir> {
     }
 }
 
-impl<Conn, I, > Object<Conn, I>
+impl<Conn, I> Object<Conn, I>
 where
     Conn: ConnectionHandle<Dir: InterfaceDir<I>>,
     I: Interface,
 {
-    pub fn conn(&self) -> &Connection<<Conn as ConnectionHandle>::Dir>  {
+    pub fn conn(&self) -> &Connection<<Conn as ConnectionHandle>::Dir> {
         self.conn.conn()
     }
 

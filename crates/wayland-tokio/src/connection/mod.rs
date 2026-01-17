@@ -33,6 +33,7 @@ pub struct Connection<Dir> {
     pub(crate) fd: AsyncFd<UnixStream>,
     drive_io: Mutex<Io>,
     registry: Mutex<Registry<Dir>>,
+    // pub(crate) recv: RecvBuf,
 }
 
 impl<Dir> Connection<Dir> {
@@ -46,6 +47,7 @@ impl<Dir> Connection<Dir> {
             fd: AsyncFd::new(sock)?,
             drive_io: Mutex::new(Io::new()),
             registry: Mutex::new(Registry::new()),
+            // recv: RecvBuf::new(),
         })
     }
 
@@ -77,10 +79,7 @@ pub trait ClientHandle: ConnectionHandle<Dir = Client> {
     {
         Object {
             conn: self.clone(),
-            id: object {
-                id: NonZero::new(id).unwrap(),
-                _marker: PhantomData,
-            },
+            id: object { id: NonZero::new(id).unwrap(), _marker: PhantomData },
         }
     }
 

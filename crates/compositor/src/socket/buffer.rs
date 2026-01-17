@@ -81,11 +81,7 @@ impl MessageQueue {
         // so handing out an immutable reference to it is fine.
         let message = unsafe { &*self.buf.add(write_next) };
 
-        write_next = if write_next + 1 < self.capacity {
-            write_next + 1
-        } else {
-            0
-        };
+        write_next = if write_next + 1 < self.capacity { write_next + 1 } else { 0 };
 
         // Use `Ordering::Acquire` to prevent a race condition between the cleanup of old messages
         // and setting `write_next` here, which would lead to a deadlock
@@ -185,11 +181,7 @@ impl MessageQueue {
                 // SAFETY:
                 // The message is active, and we have control over the queue, so getting a
                 // immutable reference to it is fine.
-                let Message {
-                    data_start,
-                    fds_start,
-                    ..
-                } = unsafe { &*message };
+                let Message { data_start, fds_start, .. } = unsafe { &*message };
 
                 // Mark `self.data` and `self.fds` as free until the contents of the message at
                 // `cleanup_until`.
@@ -249,11 +241,7 @@ struct Message {
 
 impl Message {
     #[allow(clippy::declare_interior_mutable_const)]
-    const INIT: Self = Self {
-        is_active: AtomicBool::new(false),
-        data_start: 0,
-        fds_start: 0,
-    };
+    const INIT: Self = Self { is_active: AtomicBool::new(false), data_start: 0, fds_start: 0 };
 }
 
 struct Subqueue<T> {
@@ -325,11 +313,7 @@ impl<T> Subqueue<T> {
         // be exclusively be used by holders of the handle, is fine.
         let data = unsafe { ptr::slice_from_raw_parts_mut(self.buf.add(write_next), len) };
 
-        Some(SubqueueHandle {
-            queue: self,
-            index: write_next,
-            data,
-        })
+        Some(SubqueueHandle { queue: self, index: write_next, data })
     }
 }
 

@@ -22,11 +22,7 @@ impl Wayland {
                         context.out_dir.push(path);
                     }
                 }
-                Event::Protocol {
-                    in_file,
-                    out_file,
-                    formatted,
-                } => {
+                Event::Protocol { in_file, out_file, formatted } => {
                     {
                         context.in_buf.clear();
                         context.in_buf.extend(&context.in_dir);
@@ -37,10 +33,10 @@ impl Wayland {
                     {
                         context.out_buf.clear();
                         context.out_buf.extend(&context.out_dir);
+                        context.out_buf.extend(out_file.parent());
 
                         std::fs::create_dir_all(&context.out_buf).unwrap();
-
-                        context.out_buf.push(out_file);
+                        context.out_buf.push(out_file.file_name().unwrap());
                     }
 
                     println!("cargo::rerun-if-changed={}", &context.in_buf.display());
@@ -71,17 +67,7 @@ pub struct Context<'a> {
 
 #[derive(Debug)]
 pub enum Event<'a> {
-    EnterDir {
-        in_dir: Option<&'a Path>,
-        out_dir: Option<&'a Path>,
-    },
-    Protocol {
-        in_file: &'a Path,
-        out_file: &'a Path,
-        formatted: bool,
-    },
-    ExitDir {
-        in_dir: bool,
-        out_dir: bool,
-    },
+    EnterDir { in_dir: Option<&'a Path>, out_dir: Option<&'a Path> },
+    Protocol { in_file: &'a Path, out_file: &'a Path, formatted: bool },
+    ExitDir { in_dir: bool, out_dir: bool },
 }

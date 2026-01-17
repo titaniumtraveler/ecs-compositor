@@ -11,11 +11,7 @@ pub struct CmsgCursor {
 impl CmsgCursor {
     pub fn new(msg: msghdr) -> Self {
         unsafe {
-            let mut s = Self {
-                hdr: null_mut(),
-                msg,
-                len: 0,
-            };
+            let mut s = Self { hdr: null_mut(), msg, len: 0 };
 
             s.hdr = CMSG_FIRSTHDR(&s.msg);
 
@@ -54,11 +50,7 @@ impl CmsgCursor {
                         .end(),
                 );
 
-                Ok(CmsgCursorWriteData {
-                    cursor: self,
-                    data,
-                    len: 0,
-                })
+                Ok(CmsgCursorWriteData { cursor: self, data, len: 0 })
             } else {
                 Err(())
             }

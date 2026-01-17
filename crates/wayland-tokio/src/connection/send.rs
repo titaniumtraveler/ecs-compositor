@@ -12,7 +12,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll, ready},
 };
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 impl<Conn, I> Object<Conn, I>
 where
@@ -24,12 +24,9 @@ where
     where
         Msg: Message<'a, Opcode = <Conn::Dir as InterfaceDir<I>>::Send, Interface = I> + Display,
     {
-        Send {
-            obj: self,
-            msg,
-            ready_fut: self.conn().drive_io(),
-            did_send: false,
-        }
+        debug!(msg = %msg, object = %self.id());
+
+        Send { obj: self, msg, ready_fut: self.conn().drive_io(), did_send: false }
     }
 }
 
@@ -144,10 +141,7 @@ where
 
 impl<Dir> Connection<Dir> {
     pub fn flush(&self) -> Flush<'_, Dir, impl DriveIo> {
-        Flush {
-            conn: self,
-            io_cb: self.drive_io(),
-        }
+        Flush { conn: self, io_cb: self.drive_io() }
     }
 }
 

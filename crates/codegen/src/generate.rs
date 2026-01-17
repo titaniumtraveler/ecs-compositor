@@ -1,25 +1,24 @@
 use crate::generate::flat_map_fn::IteratorExt;
-use proc_macro2::{Literal, TokenStream};
+use proc_macro2::{Literal, Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use std::fmt::Write;
+use syn::{
+    AngleBracketedGenericArguments, GenericArgument, Ident, Lifetime, PathArguments, PathSegment,
+    Token, TypePath, punctuated::Punctuated,
+};
 use wayland_scanner_lib::protocol::{Arg, Entry, Enum, Interface, Message, Protocol, Type};
 
 mod flat_map_fn;
 
 pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
-    let Protocol {
-        name,
-        description,
-        interfaces,
-        ..
-    } = protocol;
+    let Protocol { name, description, interfaces, .. } = protocol;
 
     let docs = Docs::Global.description(description);
     let name = mod_name(name);
     let interfaces = interfaces.iter().map(generate_interface);
     quote! {
         #[allow(unused_variables,unused_mut,unused_imports, dead_code, non_camel_case_types, unused_unsafe)]
-        #[allow(clippy::doc_lazy_continuation,clippy::identity_op, clippy::match_single_binding)]
+        #[allow(clippy::doc_lazy_continuation,clippy::identity_op, clippy::match_single_binding, clippy::tabs_in_doc_comments)]
         pub mod #name {
             #docs
             #(#interfaces)*
@@ -28,14 +27,7 @@ pub fn generate_protocol(protocol: &Protocol) -> TokenStream {
 }
 
 fn generate_interface(interface: &Interface) -> TokenStream {
-    let Interface {
-        name,
-        version,
-        description,
-        requests,
-        events,
-        enums,
-    } = interface;
+    let Interface { name, version, description, requests, events, enums } = interface;
 
     let error = if let Some(error) = enums.iter().find(|e| e.name == "error") {
         let name = typ_name(&error.name);
@@ -73,7 +65,9 @@ fn generate_interface(interface: &Interface) -> TokenStream {
 
     let requests = {
         let opcodes = gen_message_opcodes(requests);
-        let requests = requests.iter().map(|msg| generate_message(msg, &typ_name));
+        let requests = requests
+            .iter()
+            .map(|msg| generate_message(msg, interface, &typ_name));
 
         quote! {
             pub mod request {
@@ -86,7 +80,9 @@ fn generate_interface(interface: &Interface) -> TokenStream {
     };
     let events = {
         let opcodes = gen_message_opcodes(events);
-        let events = events.iter().map(|msg| generate_message(msg, &typ_name));
+        let events = events
+            .iter()
+            .map(|msg| generate_message(msg, interface, &typ_name));
 
         quote! {
             pub mod event {
@@ -197,14 +193,12 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
     }
 }
 
-fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
-    let Message {
-        name,
-        typ: _,
-        since,
-        description,
-        args,
-    } = message;
+fn generate_message(
+    message: &Message,
+    interface: &Interface,
+    iface_name: &syn::Ident,
+) -> TokenStream {
+    let Message { name, typ: _, since, description, args } = message;
 
     let str_name = Literal::string(name);
     let name = typ_name(name);
@@ -219,7 +213,9 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
 
     let item = {
         let docs = Docs::Local.description(description);
-        let fields = args.iter().map(gen_field);
+        let fields = args
+            .iter()
+            .map(|arg| GenArg::new(interface, arg).gen_field());
 
         quote! {
             #docs
@@ -239,22 +235,11 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
         );
 
         let fields_read = args.iter().map(|arg| {
-            let name = mod_name(&arg.name);
-            let typ = match arg.typ {
-                Type::NewId if arg.interface.is_none() => quote! { new_id_dyn },
-
-                Type::Int => quote! {    int    },
-                Type::Uint => quote! {   uint   },
-                Type::Fixed => quote! {  fixed  },
-                Type::String => quote! { string },
-                Type::Object => quote! { object },
-                Type::NewId => quote! {  new_id  },
-                Type::Array => quote! {  array  },
-                Type::Fd => quote! {     fd     },
-                Type::Destructor => unreachable!(),
-            };
+            let arg = GenArg::new(interface, arg);
+            let name = &arg.name;
+            let typ = &arg.typ;
             quote! {
-                #name: #typ::read(data, fds)?,
+                #name: <#typ>::read(data, fds)?,
             }
         });
 
@@ -275,8 +260,28 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
         let fields_debug = args.iter().map(|arg| {
             let name = mod_name(&arg.name);
             let fmt = Literal::string(&format!("{name}: {{}}, "));
-            quote! {
-                write!(f, #fmt, self.#name)?;
+            if arg.allow_null {
+                let typ = match arg.typ {
+                    Type::String => format_ident!("string"),
+                    Type::Object => format_ident!("object"),
+                    _ => unreachable!(),
+                };
+
+                let str_name = Literal::string(&format!("{name}: "));
+                quote! {
+                    match &self.#name {
+                        Some(v) => write!(f, #fmt, v)?,
+                        None => {
+                            f.write_str(#str_name)?;
+                            <#typ>::fmt_none(f)?;
+                            write!(f, ",")?;
+                        }
+                    }
+                }
+            } else {
+                quote! {
+                    write!(f, #fmt, self.#name)?;
+                }
             }
         });
 
@@ -339,71 +344,185 @@ fn generate_message(message: &Message, iface_name: &syn::Ident) -> TokenStream {
     }
 }
 
-fn gen_field(arg: &Arg) -> TokenStream {
-    let Arg {
-        name,
-        typ,
-        interface,
-        summary,
-        description,
-        allow_null: _,
-        enum_: _,
-    } = arg;
+struct GenArg {
+    name: syn::Ident,
+    docs: TokenStream,
+    typ: syn::Path,
+}
 
-    let name = mod_name(name);
-    let docs = Docs::Local.summary(summary, description);
+impl GenArg {
+    fn new(interface: &Interface, arg: &Arg) -> Self {
+        let interface = arg.interface.as_ref().map(|iface| syn::Path {
+            leading_colon: None,
+            segments: Punctuated::from_iter(
+                (iface != &interface.name)
+                    .then(|| PathSegment { ident: mod_name(iface), arguments: PathArguments::None })
+                    .into_iter()
+                    .chain(Some(PathSegment {
+                        ident: typ_name(iface),
+                        arguments: PathArguments::None,
+                    })),
+            ),
+        });
 
-    let interface = interface.as_ref().map(|interface| {
-        let mod_name = mod_name(interface);
-        let typ_name = typ_name(interface);
-        quote! {<#mod_name::#typ_name>}
-    });
+        fn ident(str: &str) -> Ident {
+            Ident::new(str, Span::call_site())
+        }
 
-    let typ = match typ {
-        Type::Int => quote! {    int    },
-        Type::Uint => quote! {   uint   },
-        Type::Fixed => quote! {  fixed  },
+        fn generic_arg(argument: GenericArgument) -> PathArguments {
+            PathArguments::AngleBracketed(AngleBracketedGenericArguments {
+                colon2_token: None,
+                lt_token: {
+                    let token = Token![<];
+                    token(Span::call_site())
+                },
+                args: {
+                    let mut punctuated = Punctuated::new();
+                    punctuated.push(argument);
+                    punctuated
+                },
+                gt_token: {
+                    let token = Token![>];
+                    token(Span::call_site())
+                },
+            })
+        }
 
-        Type::Array => quote! {  array <'data> },
-        Type::String => quote! { string<'data> },
+        let typ = syn::Path {
+            leading_colon: None,
+            segments: {
+                let mut punctuated = Punctuated::new();
+                punctuated.push(PathSegment {
+                    ident: match arg.typ {
+                        Type::Int => ident("int"),
+                        Type::Uint => ident("uint"),
+                        Type::Fixed => ident("fixed"),
 
-        Type::NewId if interface.is_none() => quote! {  new_id_dyn <'data> },
+                        Type::Array => ident("array"),
+                        Type::String => ident("string"),
 
-        Type::Object => quote! { object #interface },
-        Type::NewId => quote! {  new_id  #interface },
+                        Type::NewId => match arg.interface.is_some() {
+                            true => ident("new_id"),
+                            false => ident("new_id_dyn"),
+                        },
+                        Type::Object => ident("object"),
 
-        Type::Fd => quote! {     fd },
-        Type::Destructor => unreachable!(),
-    };
+                        Type::Fd => ident("fd"),
+                        Type::Destructor => unreachable!(),
+                    },
+                    arguments: {
+                        use Type::{Array, NewId, Object, String};
+                        match (arg.typ, interface) {
+                            (String | Array, _) | (NewId, None) => {
+                                generic_arg(GenericArgument::Lifetime(Lifetime::new(
+                                    "'data",
+                                    Span::call_site(),
+                                )))
+                            }
+                            (NewId | Object, Some(path)) => generic_arg(GenericArgument::Type(
+                                TypePath { qself: None, path }.into(),
+                            )),
+                            _ => PathArguments::None,
+                        }
+                    },
+                });
+                if arg.allow_null {
+                    let mut option = Punctuated::new();
+                    option.push(PathSegment {
+                        ident: ident("Option"),
+                        arguments: generic_arg(GenericArgument::Type(syn::Type::Path(TypePath {
+                            qself: None,
+                            path: syn::Path { leading_colon: None, segments: punctuated },
+                        }))),
+                    });
+                    option
+                } else {
+                    punctuated
+                }
+            },
+        };
 
-    quote! {
-        #docs
-        pub #name: #typ,
+        Self {
+            name: mod_name(&arg.name),
+            docs: Docs::Local.summary(&arg.summary, &arg.description),
+            typ,
+        }
+    }
+
+    fn gen_field(&self) -> TokenStream {
+        let name = &self.name;
+        let docs = &self.docs;
+        let typ = &self.typ;
+
+        quote! {
+            #docs
+            pub #name: #typ,
+        }
     }
 }
 
 fn generate_enum(enum_: &Enum) -> TokenStream {
-    let Enum {
-        name,
-        since: _,
-        description,
-        entries,
-        bitfield: _,
-    } = enum_;
+    let Enum { name, since: _, description, entries, bitfield } = enum_;
 
-    let docs = Docs::Local.description(description);
     let name = typ_name(name);
-    let entries = entries.iter().map(gen_entry);
+    let docs = Docs::Local.description(description);
+    let typ = match *bitfield {
+        true => {
+            let entries =
+                entries
+                    .iter()
+                    .map(|Entry { name, value, since: _, summary, description }| {
+                        let name = typ_name(name);
+                        let docs = Docs::Local.summary(summary, description);
+                        let value = Literal::u32_unsuffixed(*value);
+                        quote! {
+                            #docs
+                            const #name = #value;
+                        }
+                    });
 
-    let impl_enum = impl_enum(enum_);
+            quote! {
+                ::bitflags::bitflags! {
 
-    quote! {
-        #docs
-        #[derive(Debug, Clone, Copy)]
-        pub enum #name {
-            #(#entries)*
+                    #docs
+                    #[derive(Debug, Clone, Copy)]
+                    pub struct #name: u32 {
+                        #(#entries)*
+
+                        const _ = !0;
+                    }
+                }
+            }
         }
+        false => {
+            let entries =
+                entries
+                    .iter()
+                    .map(|Entry { name, value, since: _, summary, description }| {
+                        let name = typ_name(name);
+                        let docs = Docs::Local.summary(summary, description);
+                        let value = Literal::u32_unsuffixed(*value);
+                        quote! {
+                            #docs
+                            #name = #value,
+                        }
+                    });
+            quote! {
+                #docs
+                #[derive(Debug, Clone, Copy)]
+                pub enum #name {
+                    #(#entries)*
+                }
+            }
+        }
+    };
 
+    let impl_enum = match *bitfield {
+        true => impl_bitfield(enum_),
+        false => impl_enum(enum_),
+    };
+    quote! {
+        #typ
         #impl_enum
     }
 }
@@ -467,20 +586,44 @@ fn impl_enum(enum_: &Enum) -> TokenStream {
     }
 }
 
-fn gen_entry(entry: &Entry) -> TokenStream {
-    let Entry {
-        name,
-        value,
-        since: _,
-        description,
-        summary,
-    } = entry;
-    let name = typ_name(name);
-    let docs = Docs::Local.summary(summary, description);
-    let value = Literal::u32_unsuffixed(*value);
+fn impl_bitfield(enum_: &Enum) -> TokenStream {
+    let name = typ_name(&enum_.name);
     quote! {
-        #docs
-        #name = #value,
+        impl proto::enumeration for #name {
+            fn from_u32(bits: u32) -> Option<Self> {
+                Some(Self::from_bits_retain(bits))
+            }
+
+            fn to_u32(&self) -> u32 {
+                self.bits()
+            }
+
+            fn since_version(&self) -> u32 {
+                todo!()
+            }
+        }
+
+        impl Value<'_> for #name {
+            const FDS: usize = 0;
+            unsafe fn read(
+                data: &mut *const [u8],
+                fds: &mut *const [RawFd],
+            ) -> primitives::Result<Self> {
+                todo!()
+            }
+
+            fn len(&self) -> u32 {
+                uint(self.to_u32()).len()
+            }
+
+            unsafe fn write(
+                &self,
+                data: &mut *mut [u8],
+                fds: &mut *mut [RawFd],
+            ) -> primitives::Result<()> {
+                todo!()
+            }
+        }
     }
 }
 

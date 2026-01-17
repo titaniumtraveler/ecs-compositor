@@ -146,11 +146,7 @@ pub mod event {
 
     impl<I: Interface> error<I> {
         pub fn new(object: object<I>, err: I::Error, msg: &'static str) -> Self {
-            Self {
-                object,
-                err: uint(err.to_u32()),
-                msg,
-            }
+            Self { object, err: uint(err.to_u32()), msg }
         }
 
         pub fn err(&self) -> Option<I::Error> {
@@ -160,11 +156,7 @@ pub mod event {
         pub fn cast<To: Interface>(self) -> error<To> {
             let error { object, err, msg } = self;
 
-            error {
-                object: object.cast(),
-                err,
-                msg,
-            }
+            error { object: object.cast(), err, msg }
         }
     }
 

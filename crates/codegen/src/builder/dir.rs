@@ -1,5 +1,5 @@
 use crate::builder::Event;
-use std::path::Path;
+use std::{ops::Not, path::Path};
 
 #[derive(Default)]
 pub struct Dir<'a> {
@@ -11,20 +11,25 @@ pub struct Dir<'a> {
 
 impl<'a> Dir<'a> {
     pub fn new() -> Self {
-        Self {
-            in_dir: None,
-            out_dir: None,
-            children: Vec::default(),
-        }
+        Self { in_dir: None, out_dir: None, children: Vec::default() }
+    }
+
+    pub fn with(
+        in_dir: &'a (impl AsRef<Path> + ?Sized),
+        out_dir: &'a (impl AsRef<Path> + ?Sized),
+    ) -> Self {
+        Self::new().in_dir(in_dir).out_dir(out_dir)
     }
 
     pub fn in_dir(mut self, path: &'a (impl AsRef<Path> + ?Sized)) -> Self {
-        self.in_dir = Some(path.as_ref());
+        let path = path.as_ref();
+        self.in_dir = path.as_os_str().is_empty().not().then_some(path);
         self
     }
 
     pub fn out_dir(mut self, path: &'a (impl AsRef<Path> + ?Sized)) -> Self {
-        self.out_dir = Some(path.as_ref());
+        let path = path.as_ref();
+        self.out_dir = path.as_os_str().is_empty().not().then_some(path);
         self
     }
 
@@ -88,10 +93,7 @@ impl<'a> IntoIterator for Dir<'a> {
     type IntoIter = IntoIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter {
-            stack: vec![self],
-            first: true,
-        }
+        IntoIter { stack: vec![self], first: true }
     }
 }
 
@@ -99,49 +101,28 @@ impl<'a> Iterator for IntoIter<'a> {
     type Item = Event<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Dir {
-            in_dir,
-            out_dir,
-            children,
-        } = self.stack.last_mut()?;
+        let Dir { in_dir, out_dir, children } = self.stack.last_mut()?;
 
         if self.first {
             self.first = false;
-            return Some(Event::EnterDir {
-                in_dir: *in_dir,
-                out_dir: *out_dir,
-            });
+            return Some(Event::EnterDir { in_dir: *in_dir, out_dir: *out_dir });
         }
 
         match children.pop() {
             Some(Child::Dir(dir)) => {
-                let event = Event::EnterDir {
-                    in_dir: dir.in_dir,
-                    out_dir: dir.out_dir,
-                };
+                let event = Event::EnterDir { in_dir: dir.in_dir, out_dir: dir.out_dir };
                 self.stack.push(dir);
 
                 Some(event)
             }
 
-            Some(Child::Proto(Protocol {
-                in_file,
-                out_file,
-                formatted,
-            })) => Some(Event::Protocol {
-                in_file,
-                out_file,
-                formatted,
-            }),
+            Some(Child::Proto(Protocol { in_file, out_file, formatted })) => {
+                Some(Event::Protocol { in_file, out_file, formatted })
+            }
 
             None => {
-                let Dir {
-                    in_dir, out_dir, ..
-                } = self.stack.pop().expect("");
-                Some(Event::ExitDir {
-                    in_dir: in_dir.is_some(),
-                    out_dir: out_dir.is_some(),
-                })
+                let Dir { in_dir, out_dir, .. } = self.stack.pop().expect("");
+                Some(Event::ExitDir { in_dir: in_dir.is_some(), out_dir: out_dir.is_some() })
             }
         }
     }

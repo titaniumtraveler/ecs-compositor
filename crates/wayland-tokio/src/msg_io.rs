@@ -3,7 +3,14 @@
 use bstr::ByteSlice;
 use ecs_compositor_core::RawSliceExt;
 use libc::{__errno_location, c_int, iovec, msghdr, ssize_t};
-use std::{fmt::Debug, mem::MaybeUninit, os::fd::RawFd, ptr::null_mut, slice};
+use std::{
+    fmt::Debug,
+    io,
+    mem::MaybeUninit,
+    os::fd::{AsRawFd, RawFd},
+    ptr::{null_mut, slice_from_raw_parts_mut},
+    slice,
+};
 use tracing::{instrument, trace};
 
 pub mod cmsg_cursor;
@@ -22,10 +29,8 @@ impl Msg {
         iovec: &'a mut MaybeUninit<iovec>,
     ) -> &'a mut msghdr {
         unsafe {
-            let iovec = iovec.write(iovec {
-                iov_base: self.data.start().cast(),
-                iov_len: self.data.len(),
-            });
+            let iovec =
+                iovec.write(iovec { iov_base: self.data.start().cast(), iov_len: self.data.len() });
 
             hdr.write(msghdr {
                 msg_name: null_mut(),
@@ -41,10 +46,7 @@ impl Msg {
 
     pub fn recv(&mut self, socket: RawFd, flags: c_int) -> Result<Option<Self>, c_int> {
         unsafe {
-            let mut iovec = iovec {
-                iov_base: self.data.start().cast(),
-                iov_len: self.data.len(),
-            };
+            let mut iovec = iovec { iov_base: self.data.start().cast(), iov_len: self.data.len() };
 
             let mut msg = msghdr {
                 msg_name: null_mut(),
@@ -64,10 +66,7 @@ impl Msg {
     #[instrument(name = "sendmsg", level = "trace", ret, skip_all)]
     pub fn send(&mut self, socket: RawFd, flags: c_int) -> Result<Option<Msg>, c_int> {
         unsafe {
-            let mut iovec = iovec {
-                iov_base: self.data.start().cast(),
-                iov_len: self.data.len(),
-            };
+            let mut iovec = iovec { iov_base: self.data.start().cast(), iov_len: self.data.len() };
 
             let msg = msghdr {
                 msg_name: null_mut(),
@@ -121,11 +120,7 @@ impl Msg {
                         "msg(socket, msg, flags)"
                     );
 
-                    Ok(Some(Self {
-                        data,
-                        ctrl,
-                        flags: msg.msg_flags,
-                    }))
+                    Ok(Some(Self { data, ctrl, flags: msg.msg_flags }))
                 }
                 -1 => {
                     let code = *__errno_location();
@@ -186,6 +181,62 @@ impl Debug for msg_debug<'_> {
     }
 }
 
+pub unsafe fn recvmsg(
+    fd: impl AsRawFd,
+    data: *mut [iovec],
+    ctrl: *mut [u8],
+    flags: c_int,
+) -> io::Result<(usize, *mut [u8], c_int)> {
+    unsafe {
+        let mut msg = msghdr {
+            msg_name: null_mut(),
+            msg_namelen: 0,
+            msg_iov: data.cast(),
+            msg_iovlen: data.len(),
+            msg_control: ctrl.cast(),
+            msg_controllen: ctrl.len(),
+            msg_flags: 0,
+        };
+
+        let ret = libc::recvmsg(fd.as_raw_fd(), &mut msg, flags);
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok((
+            ret as usize,
+            slice_from_raw_parts_mut(msg.msg_control.cast(), msg.msg_controllen),
+            msg.msg_flags,
+        ))
+    }
+}
+
+unsafe fn sendmsg(
+    fd: impl AsRawFd,
+    data: *mut [iovec],
+    ctrl: *mut [u8],
+    flags: c_int,
+) -> io::Result<usize> {
+    unsafe {
+        let mut msg = msghdr {
+            msg_name: null_mut(),
+            msg_namelen: 0,
+            msg_iov: data.cast(),
+            msg_iovlen: data.len(),
+            msg_control: ctrl.cast(),
+            msg_controllen: ctrl.len(),
+            msg_flags: 0,
+        };
+
+        let ret = libc::sendmsg(fd.as_raw_fd(), &mut msg, flags);
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(ret as usize)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::msg_io::{Msg, cmsg_cursor::CmsgCursor};
@@ -221,15 +272,10 @@ mod tests {
                     .commit()
                     .unwrap();
 
-                let mut msg = Msg {
-                    data: &mut data_buf,
-                    ctrl: cursor.as_slice(),
-                    flags: 0,
-                };
+                let mut msg = Msg { data: &mut data_buf, ctrl: cursor.as_slice(), flags: 0 };
 
-                let ctrl_bytes = [
-                    24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
-                ];
+                let ctrl_bytes =
+                    [24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0];
                 assert_eq!(
                     msg.as_tuple(),
                     ([0, 1, 2, 3].as_slice(), ctrl_bytes.as_slice(), 0)
@@ -243,21 +289,14 @@ mod tests {
                 let mut data_buf = [0; 8];
                 let mut ctrl_buf = [0; raw_fd_space(8)];
 
-                let mut msg = Msg {
-                    data: &mut data_buf,
-                    ctrl: &mut ctrl_buf,
-                    flags: 0,
-                };
+                let mut msg = Msg { data: &mut data_buf, ctrl: &mut ctrl_buf, flags: 0 };
                 let recv = msg.recv(sv[1], 0).unwrap().unwrap();
                 assert_eq!(
                     recv.as_tuple(),
                     (
                         [0, 1, 2, 3].as_slice(),
-                        [
-                            24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0,
-                            0,
-                        ]
-                        .as_slice(),
+                        [24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0,]
+                            .as_slice(),
                         0
                     )
                 );
@@ -265,10 +304,8 @@ mod tests {
                     msg.as_tuple(),
                     (
                         [0, 0, 0, 0].as_slice(),
-                        [
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-                        ]
-                        .as_slice(),
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                            .as_slice(),
                         0
                     ),
                 );

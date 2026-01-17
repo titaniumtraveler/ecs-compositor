@@ -1,9 +1,12 @@
-use crate::{uint, Value};
+use crate::{Value, uint};
 
 pub trait enumeration: Value<'static> {
     fn from_u32(int: u32) -> Option<Self>;
     fn to_u32(&self) -> u32;
-    fn since_version(&self) -> u32 ;
+    fn to_uint(&self) -> uint {
+        uint(self.to_u32())
+    }
+    fn since_version(&self) -> u32;
 }
 
 impl enumeration for uint {
@@ -15,7 +18,7 @@ impl enumeration for uint {
         self.0
     }
 
-    fn since_version(&self) -> u32  {
+    fn since_version(&self) -> u32 {
         1
     }
 }

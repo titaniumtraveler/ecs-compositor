@@ -10,11 +10,7 @@ pub trait IteratorExt: Iterator + Sized {
         Init: FnOnce(&mut Self) -> Acc,
         F: FnMut(&mut Self, &mut Acc) -> Option<Item>,
     {
-        IterMapFn {
-            acc: init(&mut self),
-            iter: self,
-            f,
-        }
+        IterMapFn { acc: init(&mut self), iter: self, f }
     }
 }
 impl<I: Iterator> IteratorExt for I {}

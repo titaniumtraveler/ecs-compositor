@@ -22,10 +22,8 @@ where
     I: Interface,
 {
     pub fn recv(&self) -> Recv<'_, Conn, I, impl DriveIo> {
-        Recv {
-            obj: self,
-            drive_io: self.conn().drive_io(),
-        }
+        debug!(object = %self.id());
+        Recv { obj: self, drive_io: self.conn().drive_io() }
     }
 }
 
@@ -79,7 +77,7 @@ where
             let mut io = match conn.try_lock_io_buf() {
                 Some(io) => io,
                 None => {
-                    trace!(return = ?Poll::<()>::Pending, "waiting on io lock");
+                    trace!(return_ = ?Poll::<()>::Pending, "waiting on io lock");
 
                     obj.register_recv(cx);
                     return Poll::Pending;
@@ -155,7 +153,7 @@ where
                             );
                             match io.rx_msg_buf(size) {
                                 Some((cursor, _)) => {
-                                    trace!(
+                                    tracing::warn!(
                                         from = %obj.id(),
                                         to = %hdr.object_id,
                                         "dispatching to object"
@@ -274,6 +272,13 @@ where
     pub fn decode_msg<'data, M: Message<'data>>(
         &'data self,
     ) -> ecs_compositor_core::primitives::Result<M> {
+        let obj = self.hdr.object_id;
+        debug!(
+            object = %obj,
+            name = M::NAME,
+            version = M::VERSION,
+            "decode message"
+        );
         let (mut da, mut fd) = (self.da, self.fd);
 
         unsafe { M::read(&mut da, &mut fd) }

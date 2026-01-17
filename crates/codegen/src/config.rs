@@ -5,7 +5,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::{
     fs::{File, read_to_string},
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 use syn::{LitStr, parse::Parse};
@@ -169,6 +169,7 @@ pub(crate) fn write_tokens_to_file(
     }
 
     File::create(path)
+        .map_err(|err| io::Error::other(format!("{path}: {err}", path = path.display())))
         .unwrap()
         .write_all(content.as_bytes())
         .unwrap();

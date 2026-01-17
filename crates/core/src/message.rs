@@ -36,11 +36,7 @@ impl Value<'_> for message_header {
             let datalen = (i >> 16) as u16;
             let opcode = (i & 0xffff) as u16;
 
-            Ok(Self {
-                object_id,
-                datalen,
-                opcode,
-            })
+            Ok(Self { object_id, datalen, opcode })
         }
     }
 

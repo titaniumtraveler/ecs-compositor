@@ -27,19 +27,13 @@ impl<I: Interface> Clone for object<I> {
 
 impl<I: Interface> object<I> {
     pub const fn from_id(id: NonZero<u32>) -> Self {
-        Self {
-            id,
-            _marker: PhantomData,
-        }
+        Self { id, _marker: PhantomData }
     }
 
     pub const fn cast<To: Interface>(self) -> object<To> {
         let object { id, _marker: _ } = self;
 
-        object {
-            id,
-            _marker: PhantomData,
-        }
+        object { id, _marker: PhantomData }
     }
 
     pub fn id(&self) -> NonZero<u32> {
@@ -47,10 +41,7 @@ impl<I: Interface> object<I> {
     }
 
     pub fn to_new_id(self) -> new_id<I> {
-        new_id {
-            id: self.id,
-            _marker: self._marker,
-        }
+        new_id { id: self.id, _marker: self._marker }
     }
 
     pub fn err(self, err: I::Error, msg: &'static str) -> wl_display::event::error<I> {
@@ -68,10 +59,7 @@ impl<I: Interface> Value<'_> for object<I> {
         let id = unsafe { read_id(data)? }
             .ok_or(error::invalid_method.msg("null object not allowed here"))?;
 
-        Ok(Self {
-            id,
-            _marker: PhantomData,
-        })
+        Ok(Self { id, _marker: PhantomData })
     }
 
     unsafe fn write<'a>(&self, data: &mut *mut [u8], _: &mut *mut [RawFd]) -> Result<()> {
@@ -89,10 +77,7 @@ impl<I: Interface> Value<'_> for Option<object<I>> {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         match unsafe { read_id(data)? } {
             None => Ok(None),
-            Some(id) => Ok(Some(object {
-                id,
-                _marker: PhantomData,
-            })),
+            Some(id) => Ok(Some(object { id, _marker: PhantomData })),
         }
     }
 
@@ -127,10 +112,7 @@ impl<I: Interface> new_id<I> {
     pub fn cast<To: Interface>(&self) -> new_id<To> {
         let new_id { id, _marker: _ } = *self;
 
-        new_id {
-            id,
-            _marker: PhantomData,
-        }
+        new_id { id, _marker: PhantomData }
     }
 
     pub fn id(&self) -> NonZero<u32> {
@@ -138,10 +120,7 @@ impl<I: Interface> new_id<I> {
     }
 
     pub fn to_object(&self) -> object<I> {
-        object {
-            id: self.id,
-            _marker: self._marker,
-        }
+        object { id: self.id, _marker: self._marker }
     }
 
     pub fn err(self, err: I::Error, msg: &'static str) -> wl_display::event::error<I> {

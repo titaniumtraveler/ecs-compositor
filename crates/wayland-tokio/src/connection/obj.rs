@@ -43,9 +43,6 @@ where
     I: Interface,
 {
     fn clone(&self) -> Self {
-        Self {
-            conn: self.conn.clone(),
-            id: self.id,
-        }
+        Self { conn: self.conn.clone(), id: self.id }
     }
 }

@@ -39,11 +39,7 @@ impl<'data> Value<'data> for array<'data> {
         unsafe {
             let (ptr, len) = read(data)?;
 
-            Ok(Self {
-                ptr: Some(ptr),
-                len,
-                _marker: PhantomData,
-            })
+            Ok(Self { ptr: Some(ptr), len, _marker: PhantomData })
         }
     }
 
@@ -74,11 +70,7 @@ impl<'a> string<'a> {
     }
     pub fn as_slice_without_trailing_null(&self) -> &[u8] {
         let slice = self.as_slice();
-        if let Some(b'\0') = slice.last() {
-            &slice[..(slice.len() - 1)]
-        } else {
-            slice
-        }
+        if let Some(b'\0') = slice.last() { &slice[..(slice.len() - 1)] } else { slice }
     }
     pub fn as_utf8(&self) -> std::result::Result<&str, Utf8Error> {
         std::str::from_utf8(self.as_slice_without_trailing_null())
@@ -128,11 +120,7 @@ impl<'data> Value<'data> for Option<string<'data>> {
     unsafe fn read(data: &mut *const [u8], _: &mut *const [RawFd]) -> Result<Self> {
         let (ptr, len) = unsafe { read(data) }?;
 
-        Ok(NonZero::new(len).map(|len| string {
-            ptr: Some(ptr),
-            len,
-            _marker: PhantomData,
-        }))
+        Ok(NonZero::new(len).map(|len| string { ptr: Some(ptr), len, _marker: PhantomData }))
     }
 
     #[inline]

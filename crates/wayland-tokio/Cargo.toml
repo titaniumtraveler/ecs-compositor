@@ -9,8 +9,12 @@ repository.workspace = true
 
 [dependencies]
 bitflags = "2.10.0"
+bitvec = "1.0.1"
 bstr = "1.12.0"
 ecs-compositor-core.workspace = true
+ecs-compositor-message = { version = "0.1.0", path = "../message" }
+futures.workspace = true
+heapless = "0.9.1"
 libc = { version = "0.2.175", features = ["extra_traits"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = { version = "0.1.41", features = ["async-await"] }

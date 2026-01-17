@@ -208,11 +208,7 @@ impl Io {
                 CMSG_SPACE((ctrl_dst.len() * size_of::<RawFd>()) as u32) as usize,
             ));
 
-            let mut msg = Msg {
-                data,
-                ctrl,
-                flags: 0,
-            };
+            let mut msg = Msg { data, ctrl, flags: 0 };
 
             match msg.recv(guard.get_inner().as_raw_fd(), MSG_DONTWAIT) {
                 // fd closed on the other side
@@ -238,11 +234,7 @@ impl Io {
                     loop {
                         match cursor.read_cmsg() {
                             Some((
-                                cmsghdr {
-                                    cmsg_type: SOL_SOCKET,
-                                    cmsg_level: SCM_RIGHTS,
-                                    ..
-                                },
+                                cmsghdr { cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS, .. },
                                 ctrl_data,
                             )) if !ctrl_dst.is_null() => {
                                 let fds = ctrl_data.read_as::<RawFd>();
@@ -254,24 +246,13 @@ impl Io {
                                 ctrl_dst = slice_from_raw_parts_mut(null_mut(), 0);
                             }
                             Some((
-                                cmsghdr {
-                                    cmsg_type: SOL_SOCKET,
-                                    cmsg_level: SCM_RIGHTS,
-                                    ..
-                                },
+                                cmsghdr { cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS, .. },
                                 _ctrl_data,
                             )) => {
                                 warn!("duplicate SCM_RIGHTS control message");
                             }
 
-                            Some((
-                                cmsghdr {
-                                    cmsg_type,
-                                    cmsg_level,
-                                    cmsg_len,
-                                },
-                                _ctrl_data,
-                            )) => {
+                            Some((cmsghdr { cmsg_type, cmsg_level, cmsg_len }, _ctrl_data)) => {
                                 trace!(
                                     fd = guard.get_inner().as_raw_fd(),
                                     cmsg_type,
@@ -331,11 +312,7 @@ impl Io {
                 cursor.as_slice()
             };
 
-            let mut msg = Msg {
-                data,
-                ctrl,
-                flags: 0,
-            };
+            let mut msg = Msg { data, ctrl, flags: 0 };
 
             match msg.send(guard.get_inner().as_raw_fd(), MSG_DONTWAIT) {
                 // fd closed on the other side
@@ -491,10 +468,7 @@ impl BufDir {
 
 impl BufDir {
     pub fn save_cursor(&mut self) -> IoBuf {
-        IoBuf {
-            da: self.da.data,
-            fd: self.fd.data,
-        }
+        IoBuf { da: self.da.data, fd: self.fd.data }
     }
 
     pub fn restore_cursor(&mut self, cursor: IoBuf) {
@@ -560,10 +534,7 @@ impl<T> RingBuf<T> {
                 panic!("alloc failed {alloc:p}");
             }
 
-            Self {
-                buf: alloc,
-                data: slice_from_raw_parts_mut(alloc.cast(), 0),
-            }
+            Self { buf: alloc, data: slice_from_raw_parts_mut(alloc.cast(), 0) }
         }
     }
 
