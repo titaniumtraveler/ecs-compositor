@@ -98,10 +98,7 @@ fn main() {
         const WL_DISPLAY: u32 = 1;
         const WL_REGISTRY: u32 = 2;
         let bind = wayland::wl_display::request::get_registry {
-            registry: new_id {
-                id: NonZero::new_unchecked(WL_REGISTRY),
-                _marker: PhantomData,
-            },
+            registry: new_id { id: NonZero::new_unchecked(WL_REGISTRY), _marker: PhantomData },
         };
 
         let header = message_header {
@@ -165,11 +162,8 @@ fn main() {
                 use wl_display::event as wl_display;
                 match wl_display::Opcodes::from_u16(code).unwrap() {
                     wl_display::Opcodes::error => {
-                        let wl_display::error {
-                            object_id,
-                            code,
-                            message,
-                        } = wl_display::error::read(&mut data, fds).ok().unwrap();
+                        let wl_display::error { object_id, code, message } =
+                            wl_display::error::read(&mut data, fds).ok().unwrap();
 
                         let object_id = object_id.id();
                         let code = wayland::wl_display::enumeration::error::from_u32(code.0);
@@ -193,11 +187,8 @@ fn main() {
                     .unwrap()
                 {
                     wl_registry::Opcodes::global => {
-                        let wl_registry::global {
-                            name,
-                            interface,
-                            version,
-                        } = wl_registry::global::read(&mut data, fds).ok().unwrap();
+                        let wl_registry::global { name, interface, version } =
+                            wl_registry::global::read(&mut data, fds).ok().unwrap();
 
                         let name = name.0;
                         let interface = (&*slice_from_raw_parts(
@@ -249,11 +240,7 @@ impl Value<'_> for WaylandHeader {
             let datalen = (i >> 16) as u16;
             let opcode = (i & 0xffff) as u16;
 
-            Ok(WaylandHeader {
-                object_id,
-                datalen,
-                opcode,
-            })
+            Ok(WaylandHeader { object_id, datalen, opcode })
         }
     }
 
@@ -265,3 +252,6 @@ impl Value<'_> for WaylandHeader {
         }
     }
 }
+
+#[test]
+fn t() {}

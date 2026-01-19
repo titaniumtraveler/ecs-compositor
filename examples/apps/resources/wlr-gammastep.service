@@ -1,0 +1,13 @@
+[Unit]
+Description=wlr-gammastep
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/wlr-gammastep
+Environment=SOCKET_PATH=%t/wlr-gammastep.sock
+Environment=RUST_LOG=wlr-gammastep=trace
+
+[Install]
+WantedBy=niri.service

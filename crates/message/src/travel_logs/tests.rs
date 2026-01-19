@@ -36,10 +36,7 @@ unsafe impl Metadata for Bytes {
     type Data = u8;
 
     fn capacity(&self) -> Point {
-        Point {
-            slot: 8,
-            data: self.data_cap,
-        }
+        Point { slot: 8, data: self.data_cap }
     }
 
     unsafe fn alloc(&self, _new: PointRange) {}
@@ -53,27 +50,18 @@ unsafe impl Metadata for Bytes {
         if allocated.slot.from == dead.slot.from {
             let slice = self.slots.as_bitslice();
 
-            let ranges = Range {
-                from: dead.slot.upto,
-                upto: allocated.slot.upto,
-            }
-            .into_ring_bounds(self.capacity().slot);
+            let ranges = Range { from: dead.slot.upto, upto: allocated.slot.upto }
+                .into_ring_bounds(self.capacity().slot);
 
             if let Some(idx) = find_alive_mark_dead(slice, ranges.0) {
                 Some(PointRange {
-                    slot: Range {
-                        from: allocated.slot.from,
-                        upto: idx,
-                    },
+                    slot: Range { from: allocated.slot.from, upto: idx },
                     data: dead.data,
                 })
             } else if let Some(range) = ranges.1 {
                 match find_alive_mark_dead(slice, range) {
                     Some(idx) => Some(PointRange {
-                        slot: Range {
-                            from: allocated.slot.from,
-                            upto: idx,
-                        },
+                        slot: Range { from: allocated.slot.from, upto: idx },
                         data: dead.data,
                     }),
                     None => Some(allocated),
@@ -82,10 +70,7 @@ unsafe impl Metadata for Bytes {
                 Some(allocated)
             }
         } else {
-            Some(PointRange {
-                slot: allocated.slot,
-                data: allocated.data,
-            })
+            Some(PointRange { slot: allocated.slot, data: allocated.data })
         }
     }
 
@@ -96,10 +81,7 @@ unsafe impl Metadata for Bytes {
 
 impl Bytes {
     pub fn new(data_cap: usize) -> Self {
-        Self {
-            slots: BitArray::new([AtomicU8::new(0xFF)]),
-            data_cap,
-        }
+        Self { slots: BitArray::new([AtomicU8::new(0xFF)]), data_cap }
     }
 }
 
@@ -108,16 +90,10 @@ fn select_contiguos_range(
     len: usize,
 ) -> Option<Range> {
     if len <= ranges.0.clone().count() {
-        Some(Range {
-            from: ranges.0.start,
-            upto: ranges.0.start + len,
-        })
+        Some(Range { from: ranges.0.start, upto: ranges.0.start + len })
     } else if let Some(range) = ranges.1 {
         if len <= range.into_iter().count() {
-            Some(Range {
-                from: ranges.0.start,
-                upto: len,
-            })
+            Some(Range { from: ranges.0.start, upto: len })
         } else {
             None
         }
@@ -169,40 +145,28 @@ fn basic_test() {
     let buf = Buffer::new(Bytes::new(3 + 7 + 5 + 1));
     let buf = &buf;
     assert_eq!(
-        PointRange {
-            slot: Range { from: 0, upto: 0 },
-            data: Range { from: 0, upto: 0 },
-        },
+        PointRange { slot: Range { from: 0, upto: 0 }, data: Range { from: 0, upto: 0 } },
         buf.allocated_range(),
     );
 
     let a = buf.alloc_n(3).unwrap();
     let a_slice = write_slice(buf, 0, [b'a'; 3]);
     assert_eq!(
-        PointRange {
-            slot: Range { from: 0, upto: 1 },
-            data: Range { from: 0, upto: 3 },
-        },
+        PointRange { slot: Range { from: 0, upto: 1 }, data: Range { from: 0, upto: 3 } },
         buf.allocated_range()
     );
 
     let b = buf.alloc_n(7).unwrap();
     let b_slice = write_slice(buf, 3, [b'b'; 7]);
     assert_eq!(
-        PointRange {
-            slot: Range { from: 0, upto: 2 },
-            data: Range { from: 0, upto: 10 },
-        },
+        PointRange { slot: Range { from: 0, upto: 2 }, data: Range { from: 0, upto: 10 } },
         buf.allocated_range()
     );
 
     let c = buf.alloc_n(5).unwrap();
     let c_slice = write_slice(buf, 10, [b'c'; 5]);
     assert_eq!(
-        PointRange {
-            slot: Range { from: 0, upto: 3 },
-            data: Range { from: 0, upto: 15 }
-        },
+        PointRange { slot: Range { from: 0, upto: 3 }, data: Range { from: 0, upto: 15 } },
         buf.allocated_range()
     );
 
@@ -212,26 +176,17 @@ fn basic_test() {
 
     a.dealloc();
     assert_eq!(
-        PointRange {
-            slot: Range { from: 1, upto: 3 },
-            data: Range { from: 3, upto: 15 }
-        },
+        PointRange { slot: Range { from: 1, upto: 3 }, data: Range { from: 3, upto: 15 } },
         buf.allocated_range()
     );
     b.dealloc();
     assert_eq!(
-        PointRange {
-            slot: Range { from: 2, upto: 3 },
-            data: Range { from: 10, upto: 15 }
-        },
+        PointRange { slot: Range { from: 2, upto: 3 }, data: Range { from: 10, upto: 15 } },
         buf.allocated_range(),
     );
     c.dealloc();
     assert_eq!(
-        PointRange {
-            slot: Range { from: 3, upto: 3 },
-            data: Range { from: 15, upto: 15 }
-        },
+        PointRange { slot: Range { from: 3, upto: 3 }, data: Range { from: 15, upto: 15 } },
         buf.allocated_range()
     );
 }

@@ -128,12 +128,7 @@ impl<'a> PrettyVisitor<'a> {
     /// - `is_empty`: whether or not any fields have been previously written to
     ///   that writer.
     fn new(writer: Writer<'a>, is_empty: bool) -> Self {
-        Self {
-            writer,
-            is_empty,
-            style: Style::default(),
-            result: Ok(()),
-        }
+        Self { writer, is_empty, style: Style::default(), result: Ok(()) }
     }
 
     fn with_style(self, style: Style) -> Self {
@@ -151,11 +146,7 @@ impl<'a> PrettyVisitor<'a> {
     }
 
     fn bold(&self) -> Style {
-        if self.writer.has_ansi_escapes() {
-            self.style.bold()
-        } else {
-            Style::new()
-        }
+        if self.writer.has_ansi_escapes() { self.style.bold() } else { Style::new() }
     }
 }
 

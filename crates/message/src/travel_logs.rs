@@ -106,21 +106,10 @@ pub struct PointRange {
 
 impl PointRange {
     pub fn to(&self) -> Point {
-        let PointRange {
-            slot: Range {
-                from: _,
-                upto: slot,
-            },
-            data: Range {
-                from: _,
-                upto: data,
-            },
-        } = self;
+        let PointRange { slot: Range { from: _, upto: slot }, data: Range { from: _, upto: data } } =
+            self;
 
-        Point {
-            slot: *slot,
-            data: *data,
-        }
+        Point { slot: *slot, data: *data }
     }
 }
 
@@ -139,10 +128,7 @@ impl Range {
     pub const EMPTY: Self = Range { from: 0, upto: 0 };
 
     pub fn invert(self, capacity: usize) -> Self {
-        Self {
-            from: self.upto,
-            upto: self.from.checked_sub(1).unwrap_or(capacity - 1),
-        }
+        Self { from: self.upto, upto: self.from.checked_sub(1).unwrap_or(capacity - 1) }
     }
 
     pub const fn into_ring_bounds(
@@ -176,11 +162,7 @@ impl<T: Metadata> Buffer<T> {
     ///
     /// Must be valid handle
     pub unsafe fn handle_from_raw(&self, range: PointRange, handle: T::Handle) -> Handle<'_, T> {
-        Handle {
-            buf: self,
-            range,
-            handle,
-        }
+        Handle { buf: self, range, handle }
     }
 
     #[allow(dead_code)]
@@ -230,27 +212,17 @@ impl<T: Metadata> Buffer<T> {
             Ordering::Acquire,
         ) {
             // return handle
-            Ok(_) => Some(Handle {
-                buf: self,
-                handle: unsafe { self.metadata.alloc(range) },
-                range,
-            }),
+            Ok(_) => {
+                Some(Handle { buf: self, handle: unsafe { self.metadata.alloc(range) }, range })
+            }
             // mark slots as dead and return none
             Err(_) => {
                 let handle = unsafe {
-                    self.metadata.alloc(PointRange {
-                        slot: range.slot,
-                        data: Range::EMPTY,
-                    })
+                    self.metadata
+                        .alloc(PointRange { slot: range.slot, data: Range::EMPTY })
                 };
                 unsafe {
-                    self.mark_dead(
-                        PointRange {
-                            slot: range.slot,
-                            data: Range::EMPTY,
-                        },
-                        handle,
-                    );
+                    self.mark_dead(PointRange { slot: range.slot, data: Range::EMPTY }, handle);
                 }
 
                 None

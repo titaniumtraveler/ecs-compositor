@@ -1,4 +1,11 @@
 use anyhow::anyhow;
+use apps::protocols::{
+    wayland::{wl_display, wl_output, wl_registry},
+    wlr::wlr_gamma_control_unstable_v1::{
+        zwlr_gamma_control_manager_v1::{self as gamma_manager, zwlr_gamma_control_manager_v1},
+        zwlr_gamma_control_v1 as gamma_control,
+    },
+};
 use ecs_compositor_core::{
     Interface, Message, RawSliceExt, Value, fd, new_id, primitives::align, uint,
 };
@@ -9,13 +16,6 @@ use ecs_compositor_tokio::{
 };
 use futures::{Stream, StreamExt};
 use libc::{MAP_SHARED, MFD_CLOEXEC, PROT_READ, PROT_WRITE};
-use protocols::{
-    wayland::{wl_display, wl_output, wl_registry},
-    wlr::wlr_gamma_control_unstable_v1::{
-        zwlr_gamma_control_manager_v1::{self as gamma_manager, zwlr_gamma_control_manager_v1},
-        zwlr_gamma_control_v1 as gamma_control,
-    },
-};
 use std::{
     borrow::Cow,
     collections::BTreeMap,
@@ -35,8 +35,6 @@ use tokio::{
 };
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, error, info, instrument, trace, warn};
-
-apps::protocols!();
 
 #[tokio::main]
 async fn main() {
@@ -121,53 +119,43 @@ async fn config_socket() -> anyhow::Result<()> {
         }
     };
 
-    Listener {
-        buf: [0; 128 * 4],
-        listener,
-        unix_stream: None,
-        written: 0,
-        len: 0,
-    }
-    .filter_map(filter_map("socket.accept()"))
-    .flat_map_unordered(128, DecodeStream::new)
-    .filter_map(filter_map("socket.read()"))
-    .for_each_concurrent(1024, async |msg| {
-        let DecodedMessage { id, brightness } = msg;
-        let state = STATE.lock().unwrap();
-        match id {
-            0 => {
-                for (id, sender) in state.vec.iter().enumerate() {
-                    if let Some(sender) = sender {
-                        let _ =
-                            sender
-                                .send(brightness)
-                                .map_err(catch_sender_error(DecodedMessage {
-                                    id: id as u16,
-                                    brightness,
-                                }));
-                    } else {
-                        warn!(id, "sender closed");
-                    }
-                }
-            }
-            _ => {
-                let id = id - 1;
-                match state.vec.get(id as usize) {
-                    Some(sender) => {
+    Listener { buf: [0; 128 * 4], listener, unix_stream: None, written: 0, len: 0 }
+        .filter_map(filter_map("socket.accept()"))
+        .flat_map_unordered(128, DecodeStream::new)
+        .filter_map(filter_map("socket.read()"))
+        .for_each_concurrent(1024, async |msg| {
+            let DecodedMessage { id, brightness } = msg;
+            let state = STATE.lock().unwrap();
+            match id {
+                0 => {
+                    for (id, sender) in state.vec.iter().enumerate() {
                         if let Some(sender) = sender {
-                            let _ = sender.send(brightness).map_err(catch_sender_error(msg));
+                            let _ = sender.send(brightness).map_err(catch_sender_error(
+                                DecodedMessage { id: id as u16, brightness },
+                            ));
                         } else {
                             warn!(id, "sender closed");
                         }
                     }
-                    None => {
-                        warn!(id, "id doesn't exist");
+                }
+                _ => {
+                    let id = id - 1;
+                    match state.vec.get(id as usize) {
+                        Some(sender) => {
+                            if let Some(sender) = sender {
+                                let _ = sender.send(brightness).map_err(catch_sender_error(msg));
+                            } else {
+                                warn!(id, "sender closed");
+                            }
+                        }
+                        None => {
+                            warn!(id, "id doesn't exist");
+                        }
                     }
                 }
             }
-        }
-    })
-    .await;
+        })
+        .await;
 
     Ok(())
 }
@@ -217,13 +205,7 @@ impl Stream for Listener {
     type Item = io::Result<UnixStream>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let Listener {
-            buf,
-            listener,
-            unix_stream,
-            written,
-            len,
-        } = &mut *self.as_mut();
+        let Listener { buf, listener, unix_stream, written, len } = &mut *self.as_mut();
 
         let stream = match unix_stream {
             Some(stream) => stream,
@@ -262,11 +244,7 @@ struct DecodeStream {
 
 impl DecodeStream {
     fn new(stream: UnixStream) -> Self {
-        Self {
-            stream,
-            buffer: [0; 4],
-            partial_read: 0,
-        }
+        Self { stream, buffer: [0; 4], partial_read: 0 }
     }
 }
 
@@ -280,11 +258,7 @@ impl Stream for DecodeStream {
     type Item = io::Result<DecodedMessage>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let DecodeStream {
-            stream,
-            buffer,
-            partial_read,
-        } = &mut *self;
+        let DecodeStream { stream, buffer, partial_read } = &mut *self;
 
         loop {
             // invariant: `self.partial_read < 4` is always true
@@ -343,9 +317,7 @@ async fn wayland_client() -> anyhow::Result<()> {
 
     let registry;
     display
-        .send(&wl_display::request::get_registry {
-            registry: new_id!(conn, registry),
-        })
+        .send(&wl_display::request::get_registry { registry: new_id!(conn, registry) })
         .await?;
 
     let mut brightness_map = BTreeMap::<u32, usize>::new();
@@ -390,10 +362,7 @@ async fn wayland_client() -> anyhow::Result<()> {
                     assert!(zwlr_gamma_control_manager_v1::VERSION <= version.0);
                     let gamma;
                     registry
-                        .send(&bind {
-                            name,
-                            id: new_id!(conn, gamma),
-                        })
+                        .send(&bind { name, id: new_id!(conn, gamma) })
                         .await?;
                     gamma_manager = Some(gamma);
                 }
@@ -402,10 +371,7 @@ async fn wayland_client() -> anyhow::Result<()> {
 
                     let output;
                     registry
-                        .send(&bind {
-                            name,
-                            id: new_id!(conn, output),
-                        })
+                        .send(&bind { name, id: new_id!(conn, output) })
                         .await?;
 
                     let gamma_control;
@@ -514,10 +480,7 @@ async fn handle_output(
         brightness: Option<u16>,
         size: Option<u32>,
     }
-    let mut state = State {
-        brightness: None,
-        size: None,
-    };
+    let mut state = State { brightness: None, size: None };
 
     loop {
         info!("`select!()`ing between gamma and output");

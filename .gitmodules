@@ -1,10 +1,12 @@
 [submodule "wayland-protocols/wayland"]
 	path = wayland-protocols/wayland
 	url = https://gitlab.freedesktop.org/wayland/wayland.git
-	branch = ecs-compositor
+[submodule "wayland-protocols/wayland-protocols"]
+	path = wayland-protocols/wayland-protocols
+	url = https://gitlab.freedesktop.org/wayland/wayland-protocols.git
 [submodule "wayland-protocols/wlr-protocols"]
 	path = wayland-protocols/wlr-protocols
-	url = https://gitlab.freedesktop.org/wlroots/wlr-protocols
+	url = https://gitlab.freedesktop.org/wlroots/wlr-protocols.git
 # See https://github.com/Smithay/wayland-rs for the upstream
 [submodule "forked/wayland-rs"]
 	path = forked/wayland-rs

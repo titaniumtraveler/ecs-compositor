@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*", "examples/*"]
-exclude = ["forked/*"]
+exclude = ["forked/wayland-rs"]
 resolver = "3"
 
 [workspace.package]

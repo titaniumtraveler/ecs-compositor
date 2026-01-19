@@ -1,13 +1,11 @@
+use apps::protocols::wayland::{wl_display, wl_registry};
 use ecs_compositor_tokio::{
     connection::{ClientHandle, Connection},
     handle::Client,
     new_id,
 };
-use protocols::wayland::{wl_display, wl_registry};
 use std::sync::Arc;
 use tracing::{info, instrument};
-
-apps::protocols!();
 
 #[tokio::main]
 async fn main() {
@@ -44,9 +42,7 @@ async fn inner() -> anyhow::Result<()> {
 
     let registry;
     display
-        .send(&wl_display::request::get_registry {
-            registry: new_id!(conn, registry),
-        })
+        .send(&wl_display::request::get_registry { registry: new_id!(conn, registry) })
         .await?;
 
     loop {
