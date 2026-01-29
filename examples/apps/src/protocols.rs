@@ -30,3 +30,8 @@ pub mod wlr {
         "/wayland-protocols/wlr/wlr-layer-shell-unstable-v1.rs"
     ));
 }
+
+include!(concat!(
+    env!("OUT_DIR"),
+    "/wayland-protocols/brightness/brightness.rs"
+));

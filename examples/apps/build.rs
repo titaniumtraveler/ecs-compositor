@@ -1,12 +1,9 @@
 use ecs_compositor_codegen::builder::{Dir, Wayland};
 
 fn main() {
+    let out_dir = &std::env::var("OUT_DIR").unwrap();
     Wayland::protocols(
-        Dir::with(
-            "../../wayland-protocols",
-            &std::env::var("OUT_DIR").unwrap(),
-        )
-        .dir(
+        Dir::with("../../wayland-protocols", out_dir).dir(
             Dir::with("", "wayland-protocols")
                 .dir(
                     Dir::new()
@@ -26,6 +23,10 @@ fn main() {
                             "wlr-layer-shell-unstable-v1.xml",
                             "wlr-layer-shell-unstable-v1.rs",
                         ),
+                )
+                .dir(
+                    Dir::with(env!("CARGO_MANIFEST_DIR"), "brightness")
+                        .protocol("./resources/brightness.xml", "brightness.rs"),
                 ),
         ),
     );

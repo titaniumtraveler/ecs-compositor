@@ -1,5 +1,5 @@
 use crate::wl_display;
-use std::os::fd::RawFd;
+use std::{io, os::fd::RawFd};
 
 pub mod fmt;
 
@@ -65,6 +65,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Error {
     pub err: wl_display::enumeration::error,
     pub msg: &'static str,
+}
+
+impl From<Error> for io::Error {
+    fn from(Error { err, msg }: Error) -> Self {
+        io::Error::other(format!("{err}: {msg}"))
+    }
 }
 
 impl From<Error> for crate::wl_display::event::error {

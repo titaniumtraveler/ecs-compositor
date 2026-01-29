@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 anyhow = "1.0.99"
 bitflags = "2.10.0"
+bstr = "1.12.1"
 console-subscriber = "0.4.1"
 ecs-compositor-core.workspace = true
 ecs-compositor-tokio.workspace = true

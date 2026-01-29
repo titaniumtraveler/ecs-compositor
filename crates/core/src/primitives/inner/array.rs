@@ -97,8 +97,7 @@ impl<'data> Value<'data> for string<'data> {
 
         Ok(string {
             ptr: Some(ptr),
-            len: NonZero::new(len)
-                .ok_or(error::invalid_method.msg("empty string not allowed here"))?,
+            len: NonZero::new(len).ok_or(error::invalid_method.msg("empty string not allowed here"))?,
             _marker: PhantomData,
         })
     }
@@ -149,9 +148,9 @@ pub unsafe fn read(data: &mut *const [u8]) -> Result<(NonNull<u8>, u32)> {
             len.read()
         };
 
-        let content = data.split_at(align::<4>(len) as usize).ok_or_else(|| {
-            error::implementation.msg("reading buffer too short for message content")
-        })?;
+        let content = data
+            .split_at(align::<4>(len) as usize)
+            .ok_or_else(|| error::implementation.msg("reading buffer too short for message content"))?;
 
         // Safety: `data` is guarantied by caller to point to a valid buffer.
         Ok((NonNull::new_unchecked(content as *mut u8), len))

@@ -1,13 +1,17 @@
 use anyhow::anyhow;
-use apps::protocols::{
-    wayland::{wl_display, wl_output, wl_registry},
-    wlr::wlr_gamma_control_unstable_v1::{
-        zwlr_gamma_control_manager_v1::{self as gamma_manager, zwlr_gamma_control_manager_v1},
-        zwlr_gamma_control_v1 as gamma_control,
+use apps::{
+    bind::str_with_nul,
+    protocols::{
+        brightness,
+        wayland::{wl_display, wl_output, wl_registry},
+        wlr::wlr_gamma_control_unstable_v1::{
+            zwlr_gamma_control_manager_v1::{self as gamma_manager, zwlr_gamma_control_manager_v1},
+            zwlr_gamma_control_v1 as gamma_control,
+        },
     },
 };
 use ecs_compositor_core::{
-    Interface, Message, RawSliceExt, Value, fd, new_id, primitives::align, uint,
+    Interface, Message, Opcode, RawSliceExt, Value, fd, message_header, new_id, object, primitives::align, string, uint,
 };
 use ecs_compositor_tokio::{
     connection::{ClientHandle, Connection, Object},
@@ -23,6 +27,7 @@ use std::{
     error::Error,
     fmt::Display,
     io,
+    num::NonZero,
     os::fd::RawFd,
     pin::{Pin, pin},
     ptr::null_mut,
@@ -46,7 +51,20 @@ type Conn = Arc<Connection<Client>>;
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(|| Mutex::new(State::default()));
 
-type OutputSender = tokio::sync::watch::Sender<u16>;
+#[derive(Debug, Clone)]
+struct OutputState {
+    name: Arc<str>,
+    brightness: [u16; 3],
+}
+
+static UNKNOWN_NAME: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from("<unknown>"));
+
+impl Default for OutputState {
+    fn default() -> Self {
+        Self { name: Arc::clone(&UNKNOWN_NAME), brightness: [u16::MAX; _] }
+    }
+}
+type OutputSender = tokio::sync::watch::Sender<OutputState>;
 
 #[derive(Default)]
 struct State {
@@ -54,8 +72,8 @@ struct State {
 }
 
 impl State {
-    fn new_output(&mut self) -> (usize, WatchStream<u16>) {
-        let (tx, rx) = tokio::sync::watch::channel(u16::MAX);
+    fn new_output(&mut self) -> (usize, WatchStream<OutputState>) {
+        let (tx, rx) = tokio::sync::watch::channel(OutputState::default());
         let id;
 
         match self.vec.iter_mut().enumerate().find(|(_, v)| v.is_none()) {
@@ -81,9 +99,7 @@ impl State {
 
 #[instrument(ret)]
 async fn config_socket() -> anyhow::Result<()> {
-    fn filter_map<T, E: Error>(
-        at: &'static str,
-    ) -> impl FnMut(Result<T, E>) -> std::future::Ready<Option<T>> {
+    fn filter_map<T, E: Error>(at: &'static str) -> impl FnMut(Result<T, E>) -> std::future::Ready<Option<T>> {
         move |res| match res {
             Ok(stream) => std::future::ready(Some(stream)),
             Err(err) => {
@@ -91,10 +107,6 @@ async fn config_socket() -> anyhow::Result<()> {
                 std::future::ready(None)
             }
         }
-    }
-
-    fn catch_sender_error<E: Error>(msg: DecodedMessage) -> impl FnOnce(E) {
-        move |err| warn!(%err,?err, ?msg,"failed sending")
     }
 
     let path: Cow<'_, str> = match std::env::var("SOCKET_PATH") {
@@ -119,39 +131,26 @@ async fn config_socket() -> anyhow::Result<()> {
         }
     };
 
-    Listener { buf: [0; 128 * 4], listener, unix_stream: None, written: 0, len: 0 }
+    Listener { buf: [0; _], listener, unix_stream: None, written: 0, len: 0 }
         .filter_map(filter_map("socket.accept()"))
         .flat_map_unordered(128, DecodeStream::new)
         .filter_map(filter_map("socket.read()"))
         .for_each_concurrent(1024, async |msg| {
             let DecodedMessage { id, brightness } = msg;
             let state = STATE.lock().unwrap();
-            match id {
-                0 => {
-                    for (id, sender) in state.vec.iter().enumerate() {
-                        if let Some(sender) = sender {
-                            let _ = sender.send(brightness).map_err(catch_sender_error(
-                                DecodedMessage { id: id as u16, brightness },
-                            ));
-                        } else {
-                            warn!(id, "sender closed");
-                        }
+            if let 0 = id {
+                for (id, sender) in state.vec.iter().enumerate() {
+                    match sender {
+                        Some(sender) => sender.send_modify(|state| state.brightness = brightness),
+                        None => warn!(id, "sender closed"),
                     }
                 }
-                _ => {
-                    let id = id - 1;
-                    match state.vec.get(id as usize) {
-                        Some(sender) => {
-                            if let Some(sender) = sender {
-                                let _ = sender.send(brightness).map_err(catch_sender_error(msg));
-                            } else {
-                                warn!(id, "sender closed");
-                            }
-                        }
-                        None => {
-                            warn!(id, "id doesn't exist");
-                        }
-                    }
+            } else {
+                let id = id - 1;
+                match state.vec.get(id as usize) {
+                    Some(Some(sender)) => sender.send_modify(|state| state.brightness = brightness),
+                    Some(None) => warn!(id, "sender closed"),
+                    None => warn!(id, "id doesn't exist"),
                 }
             }
         })
@@ -161,7 +160,7 @@ async fn config_socket() -> anyhow::Result<()> {
 }
 
 struct Listener {
-    buf: [u8; 128 * 4],
+    buf: [u8; 4096],
     listener: UnixListener,
     unix_stream: Option<UnixStream>,
     written: usize,
@@ -169,7 +168,7 @@ struct Listener {
 }
 
 #[allow(clippy::identity_op)]
-fn write_state_to_buf(buf: &mut [u8; 128 * 4], written: &mut usize, len: &mut usize) {
+fn write_state_to_buf(buf: &mut [u8; 4096], written: &mut usize, len: &mut usize) -> io::Result<()> {
     *written = 0;
     *len = 0;
 
@@ -180,25 +179,86 @@ fn write_state_to_buf(buf: &mut [u8; 128 * 4], written: &mut usize, len: &mut us
         .enumerate()
         .filter_map(|(id, s)| s.as_ref().map(move |s| (id as u16, s)))
     {
-        let id = (id + 1).to_le_bytes();
-        let mut bright = [0; 2];
-        sender.send_if_modified(|val| {
-            bright = val.to_le_bytes();
+        use {brightness::output::event as brightness_output, brightness_output::change};
+
+        #[allow(non_camel_case_types)]
+        struct change_from_str<'data> {
+            name: Option<str_with_nul<'data>>,
+            red: uint,
+            green: uint,
+            blue: uint,
+        }
+        impl<'data> Value<'data> for change_from_str<'data> {
+            const FDS: usize = 0;
+            unsafe fn read(
+                _: &mut *const [u8],
+                _: &mut *const [RawFd],
+            ) -> ecs_compositor_core::primitives::Result<Self> {
+                unimplemented!()
+            }
+            fn len(&self) -> u32 {
+                0 + self
+                    .name
+                    .as_ref()
+                    .map(str_with_nul::len)
+                    .unwrap_or(Option::<string>::None.len())
+                    + self.red.len()
+                    + self.green.len()
+                    + self.blue.len()
+            }
+            unsafe fn write(
+                &self,
+                data: &mut *mut [u8],
+                fds: &mut *mut [RawFd],
+            ) -> ecs_compositor_core::primitives::Result<()> {
+                unsafe {
+                    match &self.name {
+                        Some(name) => name.write(data, fds)?,
+                        None => Option::<string>::None.write(data, fds)?,
+                    }
+                    self.red.write(data, fds)?;
+                    self.green.write(data, fds)?;
+                    self.blue.write(data, fds)?;
+                    Ok(())
+                }
+            }
+        }
+
+        let id = NonZero::new(id as u32 + 1).unwrap();
+        let mut res = Ok(());
+        sender.send_if_modified(|OutputState { name, brightness: [red, green, blue] }| {
+            res = (|| {
+                let msg = change_from_str {
+                    name: Some(str_with_nul(name)),
+                    red: uint(*red as u32),
+                    green: uint(*green as u32),
+                    blue: uint(*blue as u32),
+                };
+                let datalen = message_header::DATA_LEN + msg.len() as u16;
+                let hdr = message_header { object_id: object::from_id(id), datalen, opcode: change::OP };
+
+                let mut data: *mut [u8] = &mut buf[*len..*len + datalen as usize];
+                let mut ctrl: *mut [RawFd] = &mut [];
+
+                unsafe {
+                    hdr.write(&mut data, &mut ctrl)?;
+                    msg.write(&mut data, &mut ctrl)?;
+                }
+
+                debug_assert!(data.is_empty());
+                debug_assert!(ctrl.is_empty());
+
+                trace!(id = id, red, green, blue);
+
+                *len += datalen as usize;
+
+                io::Result::Ok(())
+            })();
             false
         });
-
-        trace!(
-            id = u16::from_le_bytes(id),
-            brightness = u16::from_le_bytes(bright)
-        );
-
-        buf[*len + 0] = id[0];
-        buf[*len + 1] = id[1];
-        buf[*len + 2] = bright[0];
-        buf[*len + 3] = bright[1];
-
-        *len += 4;
+        res?
     }
+    Ok(())
 }
 
 impl Stream for Listener {
@@ -210,26 +270,26 @@ impl Stream for Listener {
         let stream = match unix_stream {
             Some(stream) => stream,
             None => {
-                let (stream, _) = ready!(listener.poll_accept(cx))?;
+                let (stream, addr) = ready!(listener.poll_accept(cx))?;
+                info!( ?addr, cred = ?stream.peer_cred()?, "accepted stream");
                 let stream = unix_stream.insert(stream);
-                write_state_to_buf(buf, written, len);
+
+                write_state_to_buf(buf, written, len)?;
 
                 stream
             }
         };
         tokio::pin!(stream);
 
-        loop {
-            if len <= written {
-                break;
+        while written < len {
+            let count = ready!(stream.as_mut().poll_write(cx, &buf[*written..*len]))?;
+            debug!(written = written, len = len, count = count, "wrote bytes");
+            if let 0 = count {
+                return Poll::Ready(Some(Err(io::Error::other("Stream closed early"))));
             }
-            match ready!(stream.as_mut().poll_write(cx, &buf[*written..*len]))? {
-                0 => {
-                    return Poll::Ready(Some(Err(io::Error::other("Stream closed early"))));
-                }
-                len => *written += len,
-            }
+            *written += count;
         }
+        debug!(written, len, "finished writing state to socket");
         ready!(stream.poll_shutdown(cx))?;
 
         Poll::Ready(Some(Ok(unix_stream.take().unwrap())))
@@ -238,55 +298,90 @@ impl Stream for Listener {
 
 struct DecodeStream {
     stream: UnixStream,
-    buffer: [u8; 4],
-    partial_read: u8,
+    hdr: Option<message_header>,
+    buf: [u8; 4096],
+    len: u16,
 }
 
 impl DecodeStream {
     fn new(stream: UnixStream) -> Self {
-        Self { stream, buffer: [0; 4], partial_read: 0 }
+        Self { stream, buf: [0; _], len: 0, hdr: None }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct DecodedMessage {
-    id: u16,
-    brightness: u16,
+    id: u32,
+    brightness: [u16; 3],
 }
 
 impl Stream for DecodeStream {
     type Item = io::Result<DecodedMessage>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let DecodeStream { stream, buffer, partial_read } = &mut *self;
+        let DecodeStream { stream, buf, len, hdr } = &mut *self;
 
-        loop {
-            // invariant: `self.partial_read < 4` is always true
-            let len: u8 = ready!(
-                pin!(stream.read(&mut buffer[(*partial_read as usize)..])).poll(cx)
-            )?
-            .try_into()
-            .expect("our buffer is 4 byte long, therefore the length should always fit into a u8");
+        fn read_exact<'buf>(
+            stream: &mut UnixStream,
+            buf: &'buf mut [u8; 4096],
+            len: &mut u16,
+            expected_len: u16,
+            cx: &mut Context<'_>,
+        ) -> Poll<io::Result<Option<&'buf mut [u8]>>> {
+            assert!(expected_len <= 4096);
+            while *len < expected_len {
+                let buf = &mut buf[(*len as usize)..(expected_len as usize)];
+                let res = ready!(pin!(stream.read(buf)).poll(cx))?;
 
-            match *partial_read + len {
-                0 => break Poll::Ready(None),
-                1..4 => {
-                    *partial_read += len;
-                    continue;
+                assert!(res + *len as usize <= expected_len as usize);
+
+                match res {
+                    0 => return Poll::Ready(Ok(None)),
+                    _ => *len += res as u16,
                 }
-                4 => {
-                    break Poll::Ready(Some(Ok(DecodedMessage {
-                        id: u16::from_le_bytes([buffer[0], buffer[1]]),
-                        brightness: u16::from_le_bytes([buffer[2], buffer[3]]),
-                    })));
-                }
-                _ if len == 0 => {
-                    warn!("socket closed early");
-                    break Poll::Ready(None);
-                }
-                5.. => unreachable!(),
             }
+            Poll::Ready(Ok(Some(&mut buf[..expected_len as usize])))
         }
+
+        use brightness::output::request::set_config;
+        let (id, set_config { red: uint(red), green: uint(green), blue: uint(blue) }) = loop {
+            match &mut *hdr {
+                None => unsafe {
+                    let Some(data) = ready!(read_exact(stream, buf, len, message_header::DATA_LEN, cx))? else {
+                        return Poll::Ready(None);
+                    };
+                    let ctrl: &[RawFd] = &[];
+                    *hdr = Some(message_header::read(&mut (&*data as _), &mut (ctrl as _))?);
+                    *len = 0;
+                },
+                Some(hdr) => unsafe {
+                    use brightness::output::request as brightness_output;
+
+                    let mut data: *const [u8] =
+                        match ready!(read_exact(stream, buf, len, message_header::DATA_LEN, cx))? {
+                            Some(data) => data,
+                            None => return Poll::Ready(None),
+                        };
+                    let mut ctrl: *const [RawFd] = &[];
+                    let opcode = brightness_output::Opcodes::from_u16(hdr.opcode)
+                        .map_err(|err| io::Error::other(format!("invalid opcode for brightness: {err}")))?;
+
+                    match opcode {
+                        brightness_output::Opcodes::set_config => {
+                            let msg = brightness_output::set_config::read(&mut data, &mut ctrl)?;
+                            break (hdr.object_id.id().get(), msg);
+                        }
+                    }
+                },
+            }
+        };
+
+        *len = 0;
+        *hdr = None;
+        Poll::Ready(Some(Ok(DecodedMessage {
+            id,
+            brightness: [red as u16, green as u16, blue as u16],
+        })))
     }
 }
 
@@ -348,8 +443,7 @@ async fn wayland_client() -> anyhow::Result<()> {
                         }
                     }
                     wl_registry::event::Opcodes::global_remove => {
-                        let wl_registry::event::global_remove { name: uint(name) } =
-                            event.decode_msg().ok().unwrap();
+                        let wl_registry::event::global_remove { name: uint(name) } = event.decode_msg().ok().unwrap();
                         let id = brightness_map
                             .get(&name)
                             .expect("expected there to be an extry in brightness_map");
@@ -361,18 +455,14 @@ async fn wayland_client() -> anyhow::Result<()> {
                 (name, version, Interface::Gamma) => {
                     assert!(zwlr_gamma_control_manager_v1::VERSION <= version.0);
                     let gamma;
-                    registry
-                        .send(&bind { name, id: new_id!(conn, gamma) })
-                        .await?;
+                    registry.send(&bind { name, id: new_id!(conn, gamma) }).await?;
                     gamma_manager = Some(gamma);
                 }
                 (name, version, Interface::Output) => {
                     assert!(wl_output::wl_output::VERSION <= version.0);
 
                     let output;
-                    registry
-                        .send(&bind { name, id: new_id!(conn, output) })
-                        .await?;
+                    registry.send(&bind { name, id: new_id!(conn, output) }).await?;
 
                     let gamma_control;
                     gamma_manager
@@ -415,7 +505,7 @@ async fn wayland_client() -> anyhow::Result<()> {
 async fn handle_output(
     gamma_control: Object<Conn, gamma_control::zwlr_gamma_control_v1>,
     output: Object<Conn, wl_output::wl_output>,
-    mut brightness: WatchStream<u16>,
+    mut output_state: WatchStream<OutputState>,
 ) -> anyhow::Result<()> {
     async fn handle_gamma_event(
         gamma_control: &Object<Conn, gamma_control::zwlr_gamma_control_v1>,
@@ -424,10 +514,7 @@ async fn handle_output(
             let event = gamma_control.recv().await?;
             match event.decode_opcode() {
                 gamma_control::event::Opcodes::gamma_size => {
-                    let m = event
-                        .decode_msg::<gamma_control::event::gamma_size>()
-                        .ok()
-                        .unwrap();
+                    let m = event.decode_msg::<gamma_control::event::gamma_size>().ok().unwrap();
                     info!(%m);
                     return Ok(m.size.0);
                 }
@@ -441,15 +528,13 @@ async fn handle_output(
             }
         };
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        gamma_control
-            .send(&gamma_control::request::destroy {})
-            .await?;
+        gamma_control.send(&gamma_control::request::destroy {}).await?;
         Err(err)
     }
 
     async fn set_gamma(
         gamma_control: &Object<Conn, gamma_control::zwlr_gamma_control_v1>,
-        brightness: u16,
+        brightness: [u16; 3],
         size: u32,
     ) -> io::Result<()> {
         let gamma_fd = create_gamma_table(size, brightness)?;
@@ -477,7 +562,7 @@ async fn handle_output(
     let output_event = handle_output_event(&output);
     tokio::pin!(output_event);
     struct State {
-        brightness: Option<u16>,
+        brightness: Option<[u16; 3]>,
         size: Option<u32>,
     }
     let mut state = State { brightness: None, size: None };
@@ -486,14 +571,14 @@ async fn handle_output(
         info!("`select!()`ing between gamma and output");
         tokio::select! {
             biased;
-            brightness = brightness.next() => {
-                let Some(brightness) = brightness else {
+            output_state = output_state.next() => {
+                let Some(output_state) = output_state else {
                     return Ok(());
                 };
-                state.brightness = Some(brightness);
+                state.brightness = Some(output_state.brightness);
 
                 if let Some(size) = state.size {
-                    set_gamma(&gamma_control, brightness, size).await?;
+                    set_gamma(&gamma_control, output_state.brightness, size).await?;
                 }
             }
             // for now do nothing with the output events
@@ -516,7 +601,7 @@ async fn handle_output(
     }
 }
 
-fn create_gamma_table(size: u32, brightness: u16) -> io::Result<RawFd> {
+fn create_gamma_table(size: u32, [r, g, b]: [u16; 3]) -> io::Result<RawFd> {
     unsafe {
         let table_size = size as usize * size_of::<[u16; 3]>();
 
@@ -546,20 +631,22 @@ fn create_gamma_table(size: u32, brightness: u16) -> io::Result<RawFd> {
 
         let data = data.cast::<u16>();
 
-        #[allow(clippy::identity_op, clippy::erasing_op)]
-        for i in 0..size {
-            let brightness = brightness as u32;
+        unsafe fn write_brightness(data: *mut u16, offset: u32, brightness: u16, size: u32) {
+            unsafe {
+                for i in 0..size {
+                    let brightness = brightness as u32;
 
-            let val = brightness * i / size;
-            let val: u16 = std::cmp::min(val, u16::MAX as u32) as u16;
+                    let val = brightness * i / size;
+                    let val: u16 = std::cmp::min(val, u16::MAX as u32) as u16;
 
-            let size = size as usize;
-            let i = i as usize;
-
-            data.add(size * 0 + i).write(val);
-            data.add(size * 1 + i).write(val);
-            data.add(size * 2 + i).write(val);
+                    data.add((offset + i) as usize).write(val);
+                }
+            }
         }
+
+        write_brightness(data, size * 0, r, size);
+        write_brightness(data, size * 1, g, size);
+        write_brightness(data, size * 2, b, size);
 
         Ok(gamma_fd)
     }
@@ -613,8 +700,7 @@ impl<'data, I: Interface> Value<'data> for bind<I> {
                     (padding, data)
                 };
 
-                data.start()
-                    .copy_from_nonoverlapping(I::NAME.as_ptr(), I::NAME.len());
+                data.start().copy_from_nonoverlapping(I::NAME.as_ptr(), I::NAME.len());
                 padding.start().write_bytes(0, padding.len());
             }
 

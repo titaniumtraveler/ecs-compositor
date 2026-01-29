@@ -61,6 +61,7 @@ impl Opcode for Event {
 
 pub mod enumeration {
     use crate::{Value, enumeration, primitives, uint};
+    use core::fmt;
     use std::os::fd::RawFd;
 
     /// global error values
@@ -129,6 +130,26 @@ pub mod enumeration {
             fds: &mut *mut [RawFd],
         ) -> primitives::Result<()> {
             unsafe { uint(self.to_u32()).write(data, fds) }
+        }
+    }
+
+    impl fmt::Display for error {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(match (self, f.alternate()) {
+                (error::invalid_object, false) => "invalid_object",
+                (error::invalid_object, true) => "server couldn't find object",
+
+                (error::invalid_method, false) => "invalid_method",
+                (error::invalid_method, true) => {
+                    "method doesn't exist on the specified interface or malformed request"
+                }
+
+                (error::no_memory, true) => "no_memory",
+                (error::no_memory, false) => "server is out of memory",
+
+                (error::implementation, true) => "implementation",
+                (error::implementation, false) => "implementation error in compositor",
+            })
         }
     }
 }

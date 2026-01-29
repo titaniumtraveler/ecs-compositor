@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE protocol SYSTEM "./wayland.dtd">
+<protocol name="brightness">
+    <description summary="protocol to set monitor brightness via gamma tables"></description>
+    <interface name="output" version="1">
+        <event name="change">
+            <arg name="name" type="string" allow-null="true"></arg>
+
+            <arg name="red" type="uint"></arg>
+            <arg name="green" type="uint"></arg>
+            <arg name="blue" type="uint"></arg>
+        </event>
+        <request name="set_config">
+            <arg name="red" type="uint"></arg>
+            <arg name="green" type="uint"></arg>
+            <arg name="blue" type="uint"></arg>
+        </request>
+    </interface>
+</protocol>
