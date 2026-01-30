@@ -71,6 +71,7 @@ async fn read_from_stdin(mut socket: unix::OwnedWriteHalf) -> io::Result<()> {
             continue;
         };
 
+        #[allow(clippy::identity_op)]
         fn hex_to_u16(bytes: [&u8; 4]) -> Option<u16> {
             let [c1, c2, c3, c4] = bytes.map(|&c| {
                 let h = match c {
