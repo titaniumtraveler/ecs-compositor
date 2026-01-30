@@ -3,8 +3,8 @@ use proc_macro2::{Literal, Span, TokenStream};
 use quote::{ToTokens, format_ident, quote};
 use std::fmt::Write;
 use syn::{
-    AngleBracketedGenericArguments, GenericArgument, Ident, Lifetime, PathArguments, PathSegment,
-    Token, TypePath, punctuated::Punctuated,
+    AngleBracketedGenericArguments, GenericArgument, Ident, Lifetime, PathArguments, PathSegment, Token, TypePath,
+    punctuated::Punctuated,
 };
 use wayland_scanner_lib::protocol::{Arg, Entry, Enum, Interface, Message, Protocol, Type};
 
@@ -65,9 +65,7 @@ fn generate_interface(interface: &Interface) -> TokenStream {
 
     let requests = {
         let opcodes = gen_message_opcodes(requests);
-        let requests = requests
-            .iter()
-            .map(|msg| generate_message(msg, interface, &typ_name));
+        let requests = requests.iter().map(|msg| generate_message(msg, interface, &typ_name));
 
         quote! {
             pub mod request {
@@ -80,9 +78,7 @@ fn generate_interface(interface: &Interface) -> TokenStream {
     };
     let events = {
         let opcodes = gen_message_opcodes(events);
-        let events = events
-            .iter()
-            .map(|msg| generate_message(msg, interface, &typ_name));
+        let events = events.iter().map(|msg| generate_message(msg, interface, &typ_name));
 
         quote! {
             pub mod event {
@@ -136,12 +132,7 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
         if !messages.is_empty() {
             let fd_count = messages.iter().map(|msg| {
                 let name = self::typ_name(&msg.name);
-                let i = Literal::usize_unsuffixed(
-                    msg.args
-                        .iter()
-                        .filter(|arg| matches!(arg.typ, Type::Fd))
-                        .count(),
-                );
+                let i = Literal::usize_unsuffixed(msg.args.iter().filter(|arg| matches!(arg.typ, Type::Fd)).count());
 
                 quote! {
                     Self::#name => #i,
@@ -161,7 +152,7 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
     };
 
     quote! {
-        #[derive(Debug, Clone, Copy)]
+        #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
         pub enum Opcodes {
             #(#entry)*
         }
@@ -193,19 +184,17 @@ fn gen_message_opcodes(messages: &[Message]) -> TokenStream {
     }
 }
 
-fn generate_message(
-    message: &Message,
-    interface: &Interface,
-    iface_name: &syn::Ident,
-) -> TokenStream {
+fn generate_message(message: &Message, interface: &Interface, iface_name: &syn::Ident) -> TokenStream {
     let Message { name, typ: _, since, description, args } = message;
 
     let str_name = Literal::string(name);
     let name = typ_name(name);
 
-    let lifetime = if message.args.iter().any(|arg| {
-        matches!(arg.typ, Type::Array | Type::String | Type::NewId if arg.interface.is_none())
-    }) {
+    let lifetime = if message
+        .args
+        .iter()
+        .any(|arg| matches!(arg.typ, Type::Array | Type::String | Type::NewId if arg.interface.is_none()))
+    {
         quote! {<'data>}
     } else {
         quote! {}
@@ -213,9 +202,7 @@ fn generate_message(
 
     let item = {
         let docs = Docs::Local.description(description);
-        let fields = args
-            .iter()
-            .map(|arg| GenArg::new(interface, arg).gen_field());
+        let fields = args.iter().map(|arg| GenArg::new(interface, arg).gen_field());
 
         quote! {
             #docs
@@ -228,11 +215,7 @@ fn generate_message(
     let impl_message = {
         let version = Literal::u32_unsuffixed(*since);
 
-        let fd_count = Literal::usize_unsuffixed(
-            args.iter()
-                .filter(|arg| matches!(arg.typ, Type::Fd))
-                .count(),
-        );
+        let fd_count = Literal::usize_unsuffixed(args.iter().filter(|arg| matches!(arg.typ, Type::Fd)).count());
 
         let fields_read = args.iter().map(|arg| {
             let arg = GenArg::new(interface, arg);
@@ -413,15 +396,12 @@ impl GenArg {
                     arguments: {
                         use Type::{Array, NewId, Object, String};
                         match (arg.typ, interface) {
-                            (String | Array, _) | (NewId, None) => {
-                                generic_arg(GenericArgument::Lifetime(Lifetime::new(
-                                    "'data",
-                                    Span::call_site(),
-                                )))
-                            }
-                            (NewId | Object, Some(path)) => generic_arg(GenericArgument::Type(
-                                TypePath { qself: None, path }.into(),
+                            (String | Array, _) | (NewId, None) => generic_arg(GenericArgument::Lifetime(
+                                Lifetime::new("'data", Span::call_site()),
                             )),
+                            (NewId | Object, Some(path)) => {
+                                generic_arg(GenericArgument::Type(TypePath { qself: None, path }.into()))
+                            }
                             _ => PathArguments::None,
                         }
                     },
@@ -442,11 +422,7 @@ impl GenArg {
             },
         };
 
-        Self {
-            name: mod_name(&arg.name),
-            docs: Docs::Local.summary(&arg.summary, &arg.description),
-            typ,
-        }
+        Self { name: mod_name(&arg.name), docs: Docs::Local.summary(&arg.summary, &arg.description), typ }
     }
 
     fn gen_field(&self) -> TokenStream {
@@ -468,18 +444,15 @@ fn generate_enum(enum_: &Enum) -> TokenStream {
     let docs = Docs::Local.description(description);
     let typ = match *bitfield {
         true => {
-            let entries =
-                entries
-                    .iter()
-                    .map(|Entry { name, value, since: _, summary, description }| {
-                        let name = typ_name(name);
-                        let docs = Docs::Local.summary(summary, description);
-                        let value = Literal::u32_unsuffixed(*value);
-                        quote! {
-                            #docs
-                            const #name = #value;
-                        }
-                    });
+            let entries = entries.iter().map(|Entry { name, value, since: _, summary, description }| {
+                let name = typ_name(name);
+                let docs = Docs::Local.summary(summary, description);
+                let value = Literal::u32_unsuffixed(*value);
+                quote! {
+                    #docs
+                    const #name = #value;
+                }
+            });
 
             quote! {
                 ::bitflags::bitflags! {
@@ -495,18 +468,15 @@ fn generate_enum(enum_: &Enum) -> TokenStream {
             }
         }
         false => {
-            let entries =
-                entries
-                    .iter()
-                    .map(|Entry { name, value, since: _, summary, description }| {
-                        let name = typ_name(name);
-                        let docs = Docs::Local.summary(summary, description);
-                        let value = Literal::u32_unsuffixed(*value);
-                        quote! {
-                            #docs
-                            #name = #value,
-                        }
-                    });
+            let entries = entries.iter().map(|Entry { name, value, since: _, summary, description }| {
+                let name = typ_name(name);
+                let docs = Docs::Local.summary(summary, description);
+                let value = Literal::u32_unsuffixed(*value);
+                quote! {
+                    #docs
+                    #name = #value,
+                }
+            });
             quote! {
                 #docs
                 #[derive(Debug, Clone, Copy)]
@@ -700,11 +670,7 @@ impl Docs {
         )
     }
 
-    fn summary(
-        self,
-        summary: &Option<String>,
-        description: &Option<(String, String)>,
-    ) -> TokenStream {
+    fn summary(self, summary: &Option<String>, description: &Option<(String, String)>) -> TokenStream {
         self.with_iter(
             summary.as_deref().into_iter().chain(
                 description
