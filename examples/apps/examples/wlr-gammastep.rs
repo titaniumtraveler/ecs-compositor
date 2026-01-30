@@ -134,7 +134,6 @@ async fn config_socket() -> anyhow::Result<()> {
     Listener { buf: [0; _], listener, unix_stream: None, written: 0, len: 0 }
         .filter_map(filter_map("socket.accept()"))
         .flat_map_unordered(128, DecodeStream::new)
-        .filter_map(filter_map("socket.read()"))
         .for_each_concurrent(1024, async |msg| {
             let DecodedMessage { id, brightness } = msg;
             let state = STATE.lock().unwrap();
@@ -316,7 +315,7 @@ struct DecodedMessage {
 }
 
 impl Stream for DecodeStream {
-    type Item = io::Result<DecodedMessage>;
+    type Item = DecodedMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let DecodeStream { stream, buf, len, hdr } = &mut *self;
@@ -343,45 +342,59 @@ impl Stream for DecodeStream {
             Poll::Ready(Ok(Some(&mut buf[..expected_len as usize])))
         }
 
-        use brightness::output::request::set_config;
-        let (id, set_config { red: uint(red), green: uint(green), blue: uint(blue) }) = loop {
-            match &mut *hdr {
-                None => unsafe {
-                    let Some(data) = ready!(read_exact(stream, buf, len, message_header::DATA_LEN, cx))? else {
-                        return Poll::Ready(None);
-                    };
-                    let ctrl: &[RawFd] = &[];
-                    *hdr = Some(message_header::read(&mut (&*data as _), &mut (ctrl as _))?);
-                    *len = 0;
-                },
-                Some(hdr) => unsafe {
-                    use brightness::output::request as brightness_output;
-
-                    let mut data: *const [u8] =
-                        match ready!(read_exact(stream, buf, len, message_header::DATA_LEN, cx))? {
+        use brightness::output::request::{Opcodes, set_config};
+        let res = (|| {
+            loop {
+                match hdr {
+                    None => unsafe {
+                        let Some(data) = ready!(read_exact(stream, buf, len, message_header::DATA_LEN, cx))? else {
+                            return Poll::Ready(None);
+                        };
+                        let ctrl: &[RawFd] = &[];
+                        *hdr = Some(message_header::read(&mut (&*data as _), &mut (ctrl as _))?);
+                        *len = 0;
+                        debug!(?hdr, "read header");
+                    },
+                    Some(hdr) => unsafe {
+                        let mut data: *const [u8] = match ready!(read_exact(stream, buf, len, hdr.content_len(), cx))? {
                             Some(data) => data,
                             None => return Poll::Ready(None),
                         };
-                    let mut ctrl: *const [RawFd] = &[];
-                    let opcode = brightness_output::Opcodes::from_u16(hdr.opcode)
-                        .map_err(|err| io::Error::other(format!("invalid opcode for brightness: {err}")))?;
+                        let mut ctrl: *const [RawFd] = &[];
+                        let opcode = Opcodes::from_u16(hdr.opcode)
+                            .map_err(|err| io::Error::other(format!("invalid opcode for brightness: {err}")))?;
 
-                    match opcode {
-                        brightness_output::Opcodes::set_config => {
-                            let msg = brightness_output::set_config::read(&mut data, &mut ctrl)?;
-                            break (hdr.object_id.id().get(), msg);
+                        match opcode {
+                            set_config::OPCODE => {
+                                let msg @ set_config { red: uint(r), green: uint(g), blue: uint(b) } =
+                                    set_config::read(&mut data, &mut ctrl)?;
+                                debug_assert!(data.is_empty());
+                                debug_assert!(ctrl.is_empty());
+
+                                debug!(r, g, b, "read msg");
+                                let val = (hdr.object_id.id().get(), msg);
+                                break Poll::Ready(Some(io::Result::Ok(val)));
+                            }
                         }
-                    }
-                },
+                    },
+                }
             }
+        })();
+        let (id, set_config { red: uint(red), green: uint(green), blue: uint(blue) }) = match ready!(res) {
+            Some(Ok(ok)) => ok,
+            Some(Err(err)) => {
+                warn!(%err, ?err, "error at `socket.read()`");
+                return Poll::Ready(None);
+            }
+            None => return Poll::Ready(None),
         };
 
         *len = 0;
         *hdr = None;
-        Poll::Ready(Some(Ok(DecodedMessage {
+        Poll::Ready(Some(DecodedMessage {
             id,
             brightness: [red as u16, green as u16, blue as u16],
-        })))
+        }))
     }
 }
 

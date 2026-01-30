@@ -137,7 +137,6 @@ async fn read_from_stdin(mut socket: unix::OwnedWriteHalf) -> io::Result<()> {
             let mut data: *mut [u8] = buf;
             let mut ctrl: *mut [RawFd] = &mut [];
 
-            println!("write buf: {}", buf.len());
             hdr.write(&mut data, &mut ctrl)?;
             msg.write(&mut data, &mut ctrl)?;
 
