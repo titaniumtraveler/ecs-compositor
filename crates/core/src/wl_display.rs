@@ -1,4 +1,4 @@
-//! Stripped down impl of [`WlDisplay`] for error reporting
+//! Stripped down impl of [`wl_display`] for error reporting
 
 use crate::{Interface, interface::Opcode, object};
 use std::num::NonZero;
