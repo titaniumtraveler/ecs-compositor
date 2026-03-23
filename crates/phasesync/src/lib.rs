@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering::*},
 };
 
-pub use crate::position::Pos;
+pub use crate::position::{CarryingAdd, Pos, WrappingU6, WrappingUsize};
 
 pub mod chunk_iter;
 pub mod helpers;
@@ -18,11 +18,23 @@ mod position;
 ///
 /// See [`examples/`](./examples/) for examples on how to use this.
 #[repr(transparent)]
-pub struct Phasesync<const LEN: usize> {
+pub struct Phasesync<const MAX: usize, const LEN: usize> {
     pub chunks: [AtomicU64; LEN],
 }
 
-impl<const LEN: usize> Phasesync<LEN> {
+impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
+    pub fn new() -> Self {
+        Self { chunks: [const { AtomicU64::new(u64::MAX) }; _] }
+    }
+}
+
+impl<const MAX: usize, const LEN: usize> Default for Phasesync<MAX, LEN> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
     /// Main function of [`Phasesync`].
     /// Frees the range of slots, and then searches for the next active slot in this phase as
     /// set by `until`.
@@ -30,10 +42,10 @@ impl<const LEN: usize> Phasesync<LEN> {
     /// See [`FreeReturn`] and more importantly [`FreeReturn::AllSlotsDead`] for details.
     pub fn free_slots(
         &self,
-        slots: RangeInclusive<Pos>,
-        until: Pos,
-        commit: impl FnMut(Pos),
-    ) -> FreeReturn {
+        slots: RangeInclusive<Pos<MAX>>,
+        until: Pos<MAX>,
+        commit: impl FnMut(Pos<MAX>),
+    ) -> FreeReturn<MAX> {
         if self.fast_path(slots.clone()) {
             return FreeReturn::Successful;
         }
@@ -41,7 +53,7 @@ impl<const LEN: usize> Phasesync<LEN> {
         self.slow_path(slots, until, commit)
     }
 
-    fn fast_path(&self, slots: RangeInclusive<Pos>) -> bool {
+    fn fast_path(&self, slots: RangeInclusive<Pos<MAX>>) -> bool {
         Self::chunk_iter(slots).map(self.load_chunk_fn()).all(
             |LoadedChunk { chunk, mask, val, .. }| {
                 try_while(chunk, val, |val| val & mask == mask, |val| val & !mask)
@@ -49,12 +61,13 @@ impl<const LEN: usize> Phasesync<LEN> {
         )
     }
 
+    #[allow(unreachable_code)] // TODO
     fn slow_path(
         &self,
-        slots: RangeInclusive<Pos>,
-        until: Pos,
-        mut commit: impl FnMut(Pos),
-    ) -> FreeReturn {
+        slots: RangeInclusive<Pos<MAX>>,
+        until: Pos<MAX>,
+        mut commit: impl FnMut(Pos<MAX>),
+    ) -> FreeReturn<MAX> {
         // re-set all slots to `1u1`
         Self::chunk_iter(slots.clone())
             .map(self.load_chunk_fn())
@@ -64,26 +77,27 @@ impl<const LEN: usize> Phasesync<LEN> {
 
         let search_range = {
             let upper = slots.into_inner().1;
-            upper.wrapping_add::<LEN>(1)..=until
+
+            (upper + WrappingUsize::<MAX>::new(1))..=until
         };
         Self::chunk_iter(search_range)
             .map(self.load_chunk_fn())
             .find_map(|LoadedChunk { chunk, mut mask, mut val, info }| {
                 let mut lower = info.lower;
-                while let Some(index) = lowest_one(val & mask) {
+                while let Some(index) = lowest_one(val & mask).map(WrappingU6::new) {
                     let slot = Pos { chunk: info.chunk, index };
 
-                    if let Some(prev_index) = index
+                    if let Some(prev_index) = (*index)
                         .checked_sub(1)
-                        .filter(|prev_index| lower < *prev_index)
+                        .filter(|&prev_index| *lower < prev_index)
                     {
                         match try_while_mut(
                             chunk,
                             &mut val,
-                            |val| val & (1 << index) == 1,
-                            |val| val | bitmask_range(lower, prev_index),
+                            |val| val & (1 << *index) == 1,
+                            |val| val | bitmask_range(*lower, prev_index),
                         ) {
-                            true => mask = bitmask_range(prev_index, info.upper),
+                            true => mask = bitmask_range(prev_index, *info.upper),
                             false => continue,
                         }
                     }
@@ -93,8 +107,8 @@ impl<const LEN: usize> Phasesync<LEN> {
                     match try_while_mut(
                         chunk,
                         &mut val,
-                        |val| val & (1 << index) == 1,
-                        |val| val & !(1 << index),
+                        |val| val & (1 << *index) == 1,
+                        |val| val & !(1 << *index),
                     ) {
                         true => return Some(FreeReturn::Selected { slot }),
                         false => lower = index,
@@ -104,21 +118,19 @@ impl<const LEN: usize> Phasesync<LEN> {
             })
             .unwrap_or(FreeReturn::AllSlotsDead)
     }
-}
 
-impl<const LEN: usize> Phasesync<LEN> {
     /// Iterator over the range of bits of each chunk described by `slots`.
     /// Note if `end.chunk < start.chunk`, this *will* correctly wrap around `const LEN`
-    pub fn chunk_iter(slots: RangeInclusive<Pos>) -> ChunkIter<LEN> {
+    fn chunk_iter(slots: RangeInclusive<Pos<MAX>>) -> ChunkIter<MAX> {
         ChunkIter::new(slots)
     }
 
-    fn get_chunk(&self, info: ChunkInfo) -> &AtomicU64 {
+    fn get_chunk(&self, info: ChunkInfo<MAX>) -> &AtomicU64 {
         let ChunkInfo { chunk, .. } = info;
-        &self.chunks[chunk]
+        &self.chunks[*chunk]
     }
 
-    fn load_chunk<'chunk>(&'chunk self, info: ChunkInfo) -> LoadedChunk<'chunk> {
+    fn load_chunk<'chunk>(&'chunk self, info: ChunkInfo<MAX>) -> LoadedChunk<'chunk, MAX> {
         let chunk = self.get_chunk(info);
         let mask = info.mask();
         let val = chunk.load(Acquire);
@@ -126,27 +138,29 @@ impl<const LEN: usize> Phasesync<LEN> {
         LoadedChunk { chunk, mask, val, info }
     }
 
-    fn load_chunk_fn<'chunk>(&'chunk self) -> impl FnMut(ChunkInfo) -> LoadedChunk<'chunk> {
+    fn load_chunk_fn<'chunk>(
+        &'chunk self,
+    ) -> impl FnMut(ChunkInfo<MAX>) -> LoadedChunk<'chunk, MAX> {
         move |info| self.load_chunk(info)
     }
 }
 
-struct LoadedChunk<'chunk> {
+pub struct LoadedChunk<'chunk, const MAX: usize> {
     chunk: &'chunk AtomicU64,
     mask: u64,
     val: u64,
-    info: ChunkInfo,
+    info: ChunkInfo<MAX>,
 }
 
 #[derive(Debug, Clone, Copy)]
 #[must_use = "Make sure to handle the case of [`Self::AllSlotsDead`]"]
-pub enum FreeReturn {
+pub enum FreeReturn<const MAX: usize> {
     /// The fast path was successful, so the resources associated with the slot(s) where not freed,
     /// but will be when the oldest slot in this phase was let go.
     Successful,
     /// The resources associated with the slot were successfully freed and [`Pos`] was selected as the next slot
     /// responsible for freeing resources of this phase.
-    Selected { slot: Pos },
+    Selected { slot: Pos<MAX> },
     /// The resources associated with the slot were successfully freed, but no slot in this phase
     /// are active anymore.
     ///

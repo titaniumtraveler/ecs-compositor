@@ -1,23 +1,23 @@
 use crate::{
-    helpers::{bitmask_range, wrapping_add},
-    position::Pos,
+    helpers::bitmask_range,
+    position::{CarryingAdd, Pos, WrappingU6, WrappingUsize},
 };
 use std::ops::RangeInclusive;
 
-pub struct ChunkIter<const LEN: usize> {
+pub struct ChunkIter<const MAX: usize> {
     state: State,
-    start: Pos,
-    end: Pos,
+    start: Pos<MAX>,
+    end: Pos<MAX>,
 }
 
-impl<const LEN: usize> ChunkIter<LEN> {
-    pub fn new(range: RangeInclusive<Pos>) -> Self {
+impl<const MAX: usize> ChunkIter<MAX> {
+    pub fn new(range: RangeInclusive<Pos<MAX>>) -> Self {
         let (start, end) = range.into_inner();
         Self { state: State::Start, start, end }
     }
 
     fn wrapping_add(&self, lhs: usize, rhs: usize) -> usize {
-        wrapping_add!(lhs + rhs; 0..LEN)
+        *(WrappingUsize::<MAX>::new(lhs) + WrappingUsize::<MAX>::new(rhs))
     }
 }
 
@@ -28,8 +28,8 @@ enum State {
     None,
 }
 
-impl<const LEN: usize> Iterator for ChunkIter<LEN> {
-    type Item = ChunkInfo;
+impl<const MAX: usize> Iterator for ChunkIter<MAX> {
+    type Item = ChunkInfo<MAX>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.state {
@@ -41,13 +41,13 @@ impl<const LEN: usize> Iterator for ChunkIter<LEN> {
                         Some(ChunkInfo { chunk, lower, upper: self.end.index })
                     }
                     false => {
-                        let next_chunk = self.wrapping_add(chunk, 1);
-                        self.state = match next_chunk == self.end.chunk {
+                        let next_chunk = self.wrapping_add(*chunk, 1);
+                        self.state = match next_chunk == *self.end.chunk {
                             true => State::Middle { next_chunk },
                             false => State::End,
                         };
 
-                        Some(ChunkInfo { chunk, lower, upper: 63 })
+                        Some(ChunkInfo { chunk, lower, upper: WrappingU6::MAX })
                     }
                 }
             }
@@ -55,18 +55,22 @@ impl<const LEN: usize> Iterator for ChunkIter<LEN> {
                 let chunk = next_chunk;
 
                 let next_chunk = self.wrapping_add(chunk, 1);
-                self.state = match next_chunk == self.end.chunk {
+                self.state = match next_chunk == *self.end.chunk {
                     true => State::Middle { next_chunk },
                     false => State::End,
                 };
 
-                Some(ChunkInfo { chunk, lower: 0, upper: 63 })
+                Some(ChunkInfo {
+                    chunk: WrappingUsize::new(chunk),
+                    lower: WrappingU6::ZERO,
+                    upper: WrappingU6::MAX,
+                })
             }
             State::End => {
                 let Pos { chunk, index: upper } = self.end;
                 self.state = State::None;
 
-                Some(ChunkInfo { chunk, lower: 0, upper })
+                Some(ChunkInfo { chunk, lower: WrappingU6::ZERO, upper })
             }
             State::None => None,
         }
@@ -74,14 +78,14 @@ impl<const LEN: usize> Iterator for ChunkIter<LEN> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ChunkInfo {
-    pub chunk: usize,
-    pub lower: u8,
-    pub upper: u8,
+pub struct ChunkInfo<const MAX: usize> {
+    pub chunk: WrappingUsize<MAX>,
+    pub lower: WrappingU6,
+    pub upper: WrappingU6,
 }
 
-impl ChunkInfo {
+impl<const MAX: usize> ChunkInfo<MAX> {
     pub fn mask(&self) -> u64 {
-        bitmask_range(self.lower, self.upper)
+        bitmask_range(self.lower.inner(), self.upper.inner())
     }
 }
