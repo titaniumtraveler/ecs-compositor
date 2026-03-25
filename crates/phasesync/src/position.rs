@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    ops::{Add, Sub},
+    ops::{Add, AddAssign, Sub, SubAssign},
 };
 
 pub use self::carrying_add::{CarryingAdd, WrappingU6, WrappingUsize};
@@ -73,6 +73,17 @@ impl<const MAX: usize> Sub for Pos<MAX> {
     }
 }
 
+impl<const MAX: usize> AddAssign for Pos<MAX> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+impl<const MAX: usize> SubAssign for Pos<MAX> {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
 impl<const MAX: usize> CarryingAdd<WrappingUsize<MAX>> for Pos<MAX> {
     const ZERO: Self = <Self as CarryingAdd>::ZERO;
     const ONE: Self = <Self as CarryingAdd>::ONE;
@@ -114,6 +125,16 @@ impl<const MAX: usize> Sub<WrappingUsize<MAX>> for Pos<MAX> {
     type Output = Pos<MAX>;
     fn sub(self, rhs: WrappingUsize<MAX>) -> Self::Output {
         self.borrowing_sub(Pos::from_flat_index(*rhs), false).0
+    }
+}
+impl<const MAX: usize> AddAssign<WrappingUsize<MAX>> for Pos<MAX> {
+    fn add_assign(&mut self, rhs: WrappingUsize<MAX>) {
+        *self = *self + rhs;
+    }
+}
+impl<const MAX: usize> SubAssign<WrappingUsize<MAX>> for Pos<MAX> {
+    fn sub_assign(&mut self, rhs: WrappingUsize<MAX>) {
+        *self = *self - rhs;
     }
 }
 

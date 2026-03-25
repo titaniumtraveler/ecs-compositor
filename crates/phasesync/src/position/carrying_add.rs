@@ -1,6 +1,6 @@
 use std::{
     cmp::PartialOrd,
-    ops::{Add, Deref, Sub},
+    ops::{Add, AddAssign, Deref, Sub, SubAssign},
 };
 
 pub trait CarryingAdd<Rhs = Self>
@@ -109,6 +109,18 @@ impl Sub for WrappingU6 {
     }
 }
 
+impl AddAssign for WrappingU6 {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl SubAssign for WrappingU6 {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
 #[test]
 fn test_carrying_add() {
     fn carrying_add(lhs: u8, rhs: u8, carry: bool) -> (u8, bool) {
@@ -178,6 +190,18 @@ impl<const MAX: usize> Sub for WrappingUsize<MAX> {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
         Self(self.inner().sub(rhs.inner()))
+    }
+}
+
+impl<const MAX: usize> AddAssign for WrappingUsize<MAX> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl<const MAX: usize> SubAssign for WrappingUsize<MAX> {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
     }
 }
 
