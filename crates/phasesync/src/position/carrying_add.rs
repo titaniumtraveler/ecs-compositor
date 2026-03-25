@@ -146,7 +146,7 @@ pub struct WrappingUsize<const MAX: usize>(usize);
 
 impl<const MAX: usize> WrappingUsize<MAX> {
     pub fn new(val: usize) -> Self {
-        Self(val.max(MAX))
+        Self(val.min(MAX))
     }
 
     pub fn inner(self) -> usize {
