@@ -107,7 +107,7 @@ impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
                     match try_while_mut(
                         chunk,
                         &mut val,
-                        |val| val & (1 << *index) == 1,
+                        |val| val & (1 << *index) >> *index == 1,
                         |val| val & !(1 << *index),
                     ) {
                         true => return Some(FreeReturn::Selected { slot }),
