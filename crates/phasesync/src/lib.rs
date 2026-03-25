@@ -61,7 +61,7 @@ impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
         )
     }
 
-    #[allow(unreachable_code)] // TODO
+    // TODO: actually document the steps involved
     fn slow_path(
         &self,
         slots: RangeInclusive<Pos<MAX>>,
@@ -125,12 +125,12 @@ impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
         ChunkIter::new(slots)
     }
 
-    fn get_chunk(&self, info: ChunkInfo<MAX>) -> &AtomicU64 {
+    pub fn get_chunk(&self, info: ChunkInfo<MAX>) -> &AtomicU64 {
         let ChunkInfo { chunk, .. } = info;
         &self.chunks[*chunk]
     }
 
-    fn load_chunk<'chunk>(&'chunk self, info: ChunkInfo<MAX>) -> LoadedChunk<'chunk, MAX> {
+    pub fn load_chunk<'chunk>(&'chunk self, info: ChunkInfo<MAX>) -> LoadedChunk<'chunk, MAX> {
         let chunk = self.get_chunk(info);
         let mask = info.mask();
         let val = chunk.load(Acquire);
@@ -146,10 +146,10 @@ impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
 }
 
 pub struct LoadedChunk<'chunk, const MAX: usize> {
-    chunk: &'chunk AtomicU64,
-    mask: u64,
-    val: u64,
-    info: ChunkInfo<MAX>,
+    pub chunk: &'chunk AtomicU64,
+    pub mask: u64,
+    pub val: u64,
+    pub info: ChunkInfo<MAX>,
 }
 
 #[derive(Debug, Clone, Copy)]

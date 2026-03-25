@@ -28,6 +28,7 @@ enum State {
     None,
 }
 
+// TODO: reimplement this based on the new [`Pos::carrying_add()`] impl
 impl<const MAX: usize> Iterator for ChunkIter<MAX> {
     type Item = ChunkInfo<MAX>;
 
