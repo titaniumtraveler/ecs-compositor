@@ -2,6 +2,7 @@ use ecs_compositor_core::RawSliceExt;
 use libc::{CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, CMSG_NXTHDR, c_int, cmsghdr, msghdr};
 use std::ptr::{null_mut, slice_from_raw_parts_mut};
 
+#[derive(Debug)]
 pub struct CmsgCursor {
     msg: msghdr,
     hdr: *mut cmsghdr,
@@ -19,7 +20,9 @@ impl CmsgCursor {
         }
     }
 
-    pub fn from_ctrl_buf(ctrl_buf: *mut [u8]) -> Self {
+    /// # Safety
+    /// TODO
+    pub unsafe fn from_ctrl_buf(ctrl_buf: *mut [u8]) -> Self {
         unsafe {
             let msg = msghdr {
                 msg_name: null_mut(),
@@ -34,6 +37,7 @@ impl CmsgCursor {
         }
     }
 
+    #[allow(clippy::result_unit_err)]
     pub fn write_cursor<'a, T>(
         &'a mut self,
         cmsg_type: c_int,
@@ -46,8 +50,7 @@ impl CmsgCursor {
 
                 let data = RawSliceExt::from_range(
                     CMSG_DATA(self.hdr).cast(),
-                    slice_from_raw_parts_mut(self.msg.msg_control.cast(), self.msg.msg_controllen)
-                        .end(),
+                    slice_from_raw_parts_mut(self.msg.msg_control.cast(), self.msg.msg_controllen).end(),
                 );
 
                 Ok(CmsgCursorWriteData { cursor: self, data, len: 0 })
@@ -80,8 +83,9 @@ impl CmsgCursor {
     }
 }
 
+#[derive(Debug)]
 pub struct ReadData {
-    data: *mut [u8],
+    pub data: *mut [u8],
 }
 
 impl ReadData {

@@ -23,14 +23,9 @@ pub struct Msg {
 }
 
 impl Msg {
-    fn init_msghdr<'a>(
-        self,
-        hdr: &'a mut MaybeUninit<msghdr>,
-        iovec: &'a mut MaybeUninit<iovec>,
-    ) -> &'a mut msghdr {
+    fn init_msghdr<'a>(self, hdr: &'a mut MaybeUninit<msghdr>, iovec: &'a mut MaybeUninit<iovec>) -> &'a mut msghdr {
         unsafe {
-            let iovec =
-                iovec.write(iovec { iov_base: self.data.start().cast(), iov_len: self.data.len() });
+            let iovec = iovec.write(iovec { iov_base: self.data.start().cast(), iov_len: self.data.len() });
 
             hdr.write(msghdr {
                 msg_name: null_mut(),
@@ -89,13 +84,7 @@ impl Msg {
         }
     }
 
-    fn handle_res(
-        &mut self,
-        socket: RawFd,
-        msg: &msghdr,
-        flags: c_int,
-        res: ssize_t,
-    ) -> Result<Option<Self>, c_int> {
+    fn handle_res(&mut self, socket: RawFd, msg: &msghdr, flags: c_int, res: ssize_t) -> Result<Option<Self>, c_int> {
         unsafe {
             match res {
                 0 => {
@@ -103,15 +92,9 @@ impl Msg {
                     Ok(None)
                 }
                 ret @ 1.. => {
-                    let data = self
-                        .data
-                        .split_at(ret as usize)
-                        .expect("data buf too short");
+                    let data = self.data.split_at(ret as usize).expect("data buf too short");
 
-                    let ctrl = self
-                        .ctrl
-                        .split_at(msg.msg_controllen)
-                        .expect("ctrl buf too short");
+                    let ctrl = self.ctrl.split_at(msg.msg_controllen).expect("ctrl buf too short");
 
                     trace!(
                         socket,
@@ -147,11 +130,7 @@ impl Debug for msg_debug<'_> {
                 .field(
                     "name",
                     &if !self.0.msg_name.is_null() {
-                        slice::from_raw_parts(
-                            self.0.msg_name.cast::<u8>(),
-                            self.0.msg_namelen as usize,
-                        )
-                        .as_bstr()
+                        slice::from_raw_parts(self.0.msg_name.cast::<u8>(), self.0.msg_namelen as usize).as_bstr()
                     } else {
                         [].as_bstr()
                     },
@@ -167,10 +146,7 @@ impl Debug for msg_debug<'_> {
                 .field(
                     "control",
                     &if !self.0.msg_control.is_null() {
-                        slice::from_raw_parts(
-                            self.0.msg_control.cast::<u8>(),
-                            self.0.msg_controllen,
-                        )
+                        slice::from_raw_parts(self.0.msg_control.cast::<u8>(), self.0.msg_controllen)
                     } else {
                         &[]
                     },
@@ -181,6 +157,8 @@ impl Debug for msg_debug<'_> {
     }
 }
 
+/// # Safety
+/// TODO
 pub unsafe fn recvmsg(
     fd: impl AsRawFd,
     data: *mut [iovec],
@@ -211,14 +189,9 @@ pub unsafe fn recvmsg(
     }
 }
 
-unsafe fn sendmsg(
-    fd: impl AsRawFd,
-    data: *mut [iovec],
-    ctrl: *mut [u8],
-    flags: c_int,
-) -> io::Result<usize> {
+unsafe fn sendmsg(fd: impl AsRawFd, data: *mut [iovec], ctrl: *mut [u8], flags: c_int) -> io::Result<usize> {
     unsafe {
-        let mut msg = msghdr {
+        let msg = msghdr {
             msg_name: null_mut(),
             msg_namelen: 0,
             msg_iov: data.cast(),
@@ -228,7 +201,7 @@ unsafe fn sendmsg(
             msg_flags: 0,
         };
 
-        let ret = libc::sendmsg(fd.as_raw_fd(), &mut msg, flags);
+        let ret = libc::sendmsg(fd.as_raw_fd(), &msg, flags);
         if ret < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -251,10 +224,7 @@ mod tests {
     #[allow(unused)]
     fn test_sockpair() {
         unsafe {
-            tracing_subscriber::fmt()
-                .with_max_level(Level::TRACE)
-                .pretty()
-                .init();
+            tracing_subscriber::fmt().with_max_level(Level::TRACE).pretty().init();
 
             let mut sv: [RawFd; 2] = [0, 0];
             let ret = socketpair(AF_UNIX, SOCK_STREAM, 0, &mut sv as *mut _);
@@ -274,8 +244,7 @@ mod tests {
 
                 let mut msg = Msg { data: &mut data_buf, ctrl: cursor.as_slice(), flags: 0 };
 
-                let ctrl_bytes =
-                    [24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0];
+                let ctrl_bytes = [24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0];
                 assert_eq!(
                     msg.as_tuple(),
                     ([0, 1, 2, 3].as_slice(), ctrl_bytes.as_slice(), 0)
@@ -295,8 +264,7 @@ mod tests {
                     recv.as_tuple(),
                     (
                         [0, 1, 2, 3].as_slice(),
-                        [24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0,]
-                            .as_slice(),
+                        [24, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0,].as_slice(),
                         0
                     )
                 );
@@ -304,8 +272,7 @@ mod tests {
                     msg.as_tuple(),
                     (
                         [0, 0, 0, 0].as_slice(),
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                            .as_slice(),
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].as_slice(),
                         0
                     ),
                 );
@@ -314,11 +281,7 @@ mod tests {
                 let (hdr, data) = cursor.read_cmsg().unwrap();
                 assert_eq!(
                     hdr,
-                    cmsghdr {
-                        cmsg_len: 4 * 4 + 2 * 4,
-                        cmsg_type: SOL_SOCKET,
-                        cmsg_level: SCM_RIGHTS,
-                    }
+                    cmsghdr { cmsg_len: 4 * 4 + 2 * 4, cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS }
                 );
                 assert_eq!(*data.read_as::<RawFd>(), [5, 6]);
             }

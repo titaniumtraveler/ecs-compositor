@@ -66,7 +66,7 @@ impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
         &self,
         slots: RangeInclusive<Pos<MAX>>,
         until: Pos<MAX>,
-        mut commit: impl FnMut(Pos<MAX>),
+        commit: impl FnMut(Pos<MAX>),
     ) -> FreeReturn<MAX> {
         // re-set all slots to `1u1`
         Self::chunk_iter(slots.clone())
@@ -80,6 +80,14 @@ impl<const MAX: usize, const LEN: usize> Phasesync<MAX, LEN> {
 
             (upper + WrappingUsize::<MAX>::new(1))..=until
         };
+        self.set_in_search_range(search_range, commit)
+    }
+
+    pub fn set_in_search_range(
+        &self,
+        search_range: RangeInclusive<Pos<MAX>>,
+        mut commit: impl FnMut(Pos<MAX>),
+    ) -> FreeReturn<MAX> {
         Self::chunk_iter(search_range)
             .map(self.load_chunk_fn())
             .find_map(|LoadedChunk { chunk, mut mask, mut val, info }| {

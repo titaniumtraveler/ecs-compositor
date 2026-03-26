@@ -8,7 +8,8 @@ macro_rules! new_id {
 }
 
 // mod buffer;
+pub mod buf;
 pub mod connection;
 mod drive_io;
 pub mod handle;
-mod msg_io;
+pub mod msg_io;

@@ -38,11 +38,7 @@ pub struct AsyncIo<'a, F, Fut> {
 #[allow(private_interfaces)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub trait DriveIo {
-    fn poll_with_io(
-        self: Pin<&mut Self>,
-        io: &mut Io,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>>;
+    fn poll_with_io(self: Pin<&mut Self>, io: &mut Io, cx: &mut Context<'_>) -> Poll<io::Result<()>>;
 }
 
 impl<'a, F, Fut> DriveIo for AsyncIo<'a, F, Fut>
@@ -51,11 +47,7 @@ where
     Fut: Future<Output = io::Result<AsyncFdReadyGuard<'a, UnixStream>>>,
 {
     #[instrument(name = "poll_io", level = "trace", ret, skip_all)]
-    fn poll_with_io(
-        self: Pin<&mut Self>,
-        io: &mut Io,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn poll_with_io(self: Pin<&mut Self>, io: &mut Io, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         unsafe {
             let s = self.get_unchecked_mut();
             let f = &mut s.f;
@@ -64,9 +56,7 @@ where
             match fut.as_mut().as_pin_mut() {
                 None => {
                     let Some(interest) = io.query_interest() else {
-                        if !(io.interest & (Interest::RECV_CLOSED | Interest::SEND_CLOSED))
-                            .is_empty()
-                        {
+                        if !(io.interest & (Interest::RECV_CLOSED | Interest::SEND_CLOSED)).is_empty() {
                             debug!(
                                 rx_data_len = io.rx.da.data.len(),
                                 rx_ctrl_len = io.rx.fd.data.len(),

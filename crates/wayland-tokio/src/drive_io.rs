@@ -74,15 +74,7 @@ fn io_ready(guard: &AsyncFdReadyGuard<UnixStream>) -> Interest {
 
 impl Io {
     pub fn new() -> Self {
-        Io {
-            tx: BufDir::new(),
-            rx: BufDir::new(),
-
-            rx_hdr: None,
-            cmsg_buf: [0; _],
-
-            interest: Interest::RECV,
-        }
+        Io { tx: BufDir::new(), rx: BufDir::new(), rx_hdr: None, cmsg_buf: [0; _], interest: Interest::RECV }
     }
 
     pub fn query_interest(&mut self) -> Option<tokio::io::Interest> {
@@ -233,10 +225,9 @@ impl Io {
 
                     loop {
                         match cursor.read_cmsg() {
-                            Some((
-                                cmsghdr { cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS, .. },
-                                ctrl_data,
-                            )) if !ctrl_dst.is_null() => {
+                            Some((cmsghdr { cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS, .. }, ctrl_data))
+                                if !ctrl_dst.is_null() =>
+                            {
                                 let fds = ctrl_data.read_as::<RawFd>();
                                 assert!(fds.len() <= ctrl_dst.len());
 
@@ -245,20 +236,14 @@ impl Io {
 
                                 ctrl_dst = slice_from_raw_parts_mut(null_mut(), 0);
                             }
-                            Some((
-                                cmsghdr { cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS, .. },
-                                _ctrl_data,
-                            )) => {
+                            Some((cmsghdr { cmsg_type: SOL_SOCKET, cmsg_level: SCM_RIGHTS, .. }, _ctrl_data)) => {
                                 warn!("duplicate SCM_RIGHTS control message");
                             }
 
                             Some((cmsghdr { cmsg_type, cmsg_level, cmsg_len }, _ctrl_data)) => {
                                 trace!(
                                     fd = guard.get_inner().as_raw_fd(),
-                                    cmsg_type,
-                                    cmsg_level,
-                                    cmsg_len,
-                                    "unknown cmsg type, discarding"
+                                    cmsg_type, cmsg_level, cmsg_len, "unknown cmsg type, discarding"
                                 );
                             }
                             None => {
@@ -332,9 +317,7 @@ impl Io {
                     );
 
                     da.data.split_at(msg.data.len()).unwrap();
-                    fd.data
-                        .split_at(cmp::min(fd.data.len(), MAX_FDS as usize))
-                        .unwrap();
+                    fd.data.split_at(cmp::min(fd.data.len(), MAX_FDS as usize)).unwrap();
 
                     if da.data.is_empty() {
                         self.interest.remove(Interest::SEND);
@@ -354,11 +337,7 @@ impl Io {
     }
 
     #[instrument(level = "trace", ret, skip_all)]
-    pub fn tx_msg_buf<'a, M>(
-        &mut self,
-        object_id: object<M::Interface>,
-        msg: &M,
-    ) -> Option<(IoBuf, IoBuf)>
+    pub fn tx_msg_buf<'a, M>(&mut self, object_id: object<M::Interface>, msg: &M) -> Option<(IoBuf, IoBuf)>
     where
         M: Message<'a>,
     {
@@ -389,14 +368,10 @@ impl Io {
                     tx.da.data.set_len(tx.da.data.len() + data_len);
                     tx.fd.data.set_len(tx.fd.data.len() + ctrl_len);
 
-                    message_header {
-                        object_id: object_id.cast(),
-                        datalen: da.len() as u16,
-                        opcode: M::OP,
-                    }
-                    .write(&mut da, &mut fd)
-                    .ok()
-                    .expect("failed writing message_header");
+                    message_header { object_id: object_id.cast(), datalen: da.len() as u16, opcode: M::OP }
+                        .write(&mut da, &mut fd)
+                        .ok()
+                        .expect("failed writing message_header");
 
                     Some((cursor, IoBuf { da, fd }))
                 }

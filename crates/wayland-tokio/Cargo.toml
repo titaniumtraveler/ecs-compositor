@@ -8,6 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+bitfield = "0.19.4"
 bitflags = "2.10.0"
 bitvec = "1.0.1"
 bstr = "1.12.0"
@@ -16,11 +17,15 @@ ecs-compositor-message = { version = "0.1.0", path = "../message" }
 futures.workspace = true
 heapless = "0.9.1"
 libc = { version = "0.2.175", features = ["extra_traits"] }
+phasesync.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing = { version = "0.1.41", features = ["async-await"] }
 
 [dev-dependencies]
-tracing-subscriber = { version = "0.3.20", features = ["json"] }
+ecs-helpers.workspace = true
+
+[build-dependencies]
+ecs-compositor-codegen.workspace = true
 
 [lints]
 workspace = true

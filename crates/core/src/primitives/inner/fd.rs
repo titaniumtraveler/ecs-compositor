@@ -10,7 +10,7 @@ use std::os::fd::RawFd;
 pub struct fd(pub RawFd);
 
 impl Value<'_> for fd {
-    const FDS: usize = 0;
+    const FDS: usize = 1;
     fn len(&self) -> u32 {
         0
     }

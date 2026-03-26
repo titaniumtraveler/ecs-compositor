@@ -114,21 +114,14 @@ pub mod enumeration {
             uint(self.to_u32()).len()
         }
 
-        unsafe fn read(
-            data: &mut *const [u8],
-            fds: &mut *const [RawFd],
-        ) -> primitives::Result<Self> {
+        unsafe fn read(data: &mut *const [u8], fds: &mut *const [RawFd]) -> primitives::Result<Self> {
             unsafe {
                 Self::from_u32(uint::read(data, fds)?.0)
                     .ok_or(error::implementation.msg("invalid u32 value for `wl_display::error`"))
             }
         }
 
-        unsafe fn write(
-            &self,
-            data: &mut *mut [u8],
-            fds: &mut *mut [RawFd],
-        ) -> primitives::Result<()> {
+        unsafe fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> primitives::Result<()> {
             unsafe { uint(self.to_u32()).write(data, fds) }
         }
     }
@@ -140,9 +133,7 @@ pub mod enumeration {
                 (error::invalid_object, true) => "server couldn't find object",
 
                 (error::invalid_method, false) => "invalid_method",
-                (error::invalid_method, true) => {
-                    "method doesn't exist on the specified interface or malformed request"
-                }
+                (error::invalid_method, true) => "method doesn't exist on the specified interface or malformed request",
 
                 (error::no_memory, true) => "no_memory",
                 (error::no_memory, false) => "server is out of memory",
@@ -205,18 +196,11 @@ pub mod event {
             self.object.len() + self.err.len() + to_str(self.msg).len()
         }
 
-        unsafe fn read(
-            _data: &mut *const [u8],
-            _fds: &mut *const [RawFd],
-        ) -> crate::primitives::Result<Self> {
+        unsafe fn read(_data: &mut *const [u8], _fds: &mut *const [RawFd]) -> crate::primitives::Result<Self> {
             unimplemented!()
         }
 
-        unsafe fn write(
-            &self,
-            data: &mut *mut [u8],
-            fds: &mut *mut [RawFd],
-        ) -> crate::primitives::Result<()> {
+        unsafe fn write(&self, data: &mut *mut [u8], fds: &mut *mut [RawFd]) -> crate::primitives::Result<()> {
             unsafe {
                 self.object.write(data, fds)?;
                 self.err.write(data, fds)?;

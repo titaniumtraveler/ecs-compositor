@@ -44,11 +44,7 @@ where
     I: Interface,
     Fut: DriveIo,
 {
-    fn drive_io(
-        self: &mut Pin<&mut Self>,
-        io: &mut Io,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn drive_io(self: &mut Pin<&mut Self>, io: &mut Io, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.drive_io) }.poll_with_io(io, cx) {
             Poll::Ready(ready) => Poll::Ready(ready),
             Poll::Pending => Poll::Pending,
@@ -98,12 +94,9 @@ where
                         };
 
                         io.rx_hdr = Some(
-                            message_header::read(
-                                &mut buf.da.cast_const(),
-                                &mut buf.fd.cast_const(),
-                            )
-                            .ok()
-                            .expect("failed to read header"),
+                            message_header::read(&mut buf.da.cast_const(), &mut buf.fd.cast_const())
+                                .ok()
+                                .expect("failed to read header"),
                         );
                         trace!(hdr = ?io.rx_hdr, "parsed header");
                         continue;
@@ -269,9 +262,7 @@ where
             .unwrap()
     }
 
-    pub fn decode_msg<'data, M: Message<'data>>(
-        &'data self,
-    ) -> ecs_compositor_core::primitives::Result<M> {
+    pub fn decode_msg<'data, M: Message<'data>>(&'data self) -> ecs_compositor_core::primitives::Result<M> {
         let obj = self.hdr.object_id;
         debug!(
             object = %obj,

@@ -7,8 +7,8 @@ use std::os::unix::prelude::RawFd;
 
 /// Fixed-point number
 ///
-/// A [`Fixed`] is a 24.8 signed fixed-point number with a sign bit, 23 bits
-/// of integer precision and 8 bits of decimal precision. Consider [`Fixed`]
+/// A [`fixed`] is a 24.8 signed fixed-point number with a sign bit, 23 bits
+/// of integer precision and 8 bits of decimal precision. Consider [`fixed`]
 /// as an opaque struct with methods that facilitate conversion to and from
 /// [`f64`] and [`i32`] types.
 #[allow(non_camel_case_types)]

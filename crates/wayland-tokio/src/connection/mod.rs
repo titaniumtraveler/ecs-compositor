@@ -77,10 +77,7 @@ pub trait ClientHandle: ConnectionHandle<Dir = Client> {
     where
         I: Interface,
     {
-        Object {
-            conn: self.clone(),
-            id: object { id: NonZero::new(id).unwrap(), _marker: PhantomData },
-        }
+        Object { conn: self.clone(), id: object { id: NonZero::new(id).unwrap(), _marker: PhantomData } }
     }
 
     fn new_object<I>(&self) -> (new_id<I>, Object<Self, I>)

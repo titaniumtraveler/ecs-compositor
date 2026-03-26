@@ -75,6 +75,12 @@ impl WrappingU6 {
     }
 }
 
+impl From<WrappingU6> for u8 {
+    fn from(value: WrappingU6) -> Self {
+        *value
+    }
+}
+
 impl CarryingAdd for WrappingU6 {
     const ZERO: Self = Self(0);
     const ONE: Self = Self(1);

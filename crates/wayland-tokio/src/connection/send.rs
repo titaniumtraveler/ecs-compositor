@@ -55,11 +55,7 @@ where
         unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.ready_fut) }
     }
 
-    fn drive_io(
-        self: &mut Pin<&mut Self>,
-        io: &mut Io,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn drive_io(self: &mut Pin<&mut Self>, io: &mut Io, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.ready_fut().poll_with_io(io, cx)
     }
 
@@ -118,9 +114,7 @@ where
                     return Poll::Pending;
                 };
 
-                msg.write(&mut buf.da, &mut buf.fd)
-                    .ok()
-                    .expect("serialization error");
+                msg.write(&mut buf.da, &mut buf.fd).ok().expect("serialization error");
                 self.as_mut().get_unchecked_mut().did_send = true;
             }
 

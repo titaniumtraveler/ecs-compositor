@@ -89,4 +89,8 @@ impl<const MAX: usize> ChunkInfo<MAX> {
     pub fn mask(&self) -> u64 {
         bitmask_range(self.lower.inner(), self.upper.inner())
     }
+
+    pub fn range(&self) -> RangeInclusive<u8> {
+        *self.lower..=*self.upper
+    }
 }

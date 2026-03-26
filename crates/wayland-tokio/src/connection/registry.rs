@@ -64,10 +64,8 @@ impl<Dir> Registry<Dir> {
         match self.receiver_map.entry(obj.cast::<()>()) {
             btree_map::Entry::Vacant(vacant_entry) => {
                 trace!(id = obj.id, "register new recv");
-                vacant_entry.insert(RecvEntry {
-                    waker: cx.waker().clone(),
-                    fd_count: <Dir as InterfaceDir<I>>::recv_fd_count,
-                });
+                vacant_entry
+                    .insert(RecvEntry { waker: cx.waker().clone(), fd_count: <Dir as InterfaceDir<I>>::recv_fd_count });
             }
             btree_map::Entry::Occupied(occupied_entry) => {
                 trace!(id = obj.id, "reregister old recv");

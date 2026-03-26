@@ -103,8 +103,7 @@ impl<T> RawSliceExt for *mut [T] {
     unsafe fn split_at_unchecked(&mut self, len: usize) -> Self {
         unsafe {
             let split_off = slice_from_raw_parts_mut(self.cast(), len);
-            *self =
-                slice_from_raw_parts_mut(self.cast::<T>().add(len), self.len().unchecked_sub(len));
+            *self = slice_from_raw_parts_mut(self.cast::<T>().add(len), self.len().unchecked_sub(len));
             split_off
         }
     }
@@ -142,8 +141,7 @@ impl<T> RawSliceExt for NonNull<[T]> {
         // `ptr.add()` is safe because it stays inside the already existing allocation, which the
         // caller guaranties to be valid.
         unsafe {
-            let split_off =
-                Self::new_unchecked(slice_from_raw_parts_mut(self.as_ptr().cast(), count));
+            let split_off = Self::new_unchecked(slice_from_raw_parts_mut(self.as_ptr().cast(), count));
             *self = Self::new_unchecked(slice_from_raw_parts_mut(
                 self.as_ptr().cast::<T>().add(count),
                 self.len().unchecked_sub(count),
