@@ -219,10 +219,7 @@ async fn wayland_client(_data: &[(String, File)]) -> io::Result<()> {
             let event = layer_surface.recv().await?;
             match event.decode_opcode() {
                 configure => {
-                    let event = event
-                        .decode_msg::<wlr_layer_surface::configure>()
-                        .ok()
-                        .unwrap();
+                    let event = event.decode_msg::<wlr_layer_surface::configure>().ok().unwrap();
                     info!(event =  %event);
                     event
                 }
@@ -239,7 +236,7 @@ async fn wayland_client(_data: &[(String, File)]) -> io::Result<()> {
             BufSize { width: configure.width.0, height: configure.height.0, scale: 2 },
         )
         .await?;
-        buf.render_to_fd(0x00_00_00_00)?;
+        buf.render_to_fd(0x80_ff_00_00)?;
         let h6 = spawn(handle_wl_buffer(buf.buffer.clone()), "wl_buffer");
         info!(size = ?buf.size, "buffer");
 
