@@ -15,6 +15,7 @@ repository = "https://github.com/titaniumtraveler/ecs-compositor"
 ecs-compositor-core = { path = "./crates/core" }
 ecs-compositor-codegen = { path = "./crates/codegen" }
 ecs-compositor-tokio = { path = "./crates/wayland-tokio" }
+ecs-helpers = { path = "./crates/helpers" }
 
 wayland-scanner-lib = { version = "0.31.6", path = "./forked/wayland-rs/wayland-scanner-lib" }
 
