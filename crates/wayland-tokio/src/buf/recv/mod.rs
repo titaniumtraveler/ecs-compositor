@@ -1,21 +1,19 @@
 use crate::buf::{macros::gen_bitfield, span::Span};
 use bitfield::{bitfield, bitfield_fields};
 use ecs_compositor_core::message_header;
-use phasesync::{CarryingAdd, FreeReturn, WrappingU6};
+use phasesync::WrappingU6;
 use std::{
     fmt::Debug,
     num::NonZero,
-    ops::RangeInclusive,
     os::fd::RawFd,
     ptr::slice_from_raw_parts_mut,
-    sync::atomic::{
-        AtomicU64,
-        Ordering::{Acquire, Relaxed, Release},
-    },
+    sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
-use tracing::{info, info_span};
 
-pub use self::io::RecvState;
+pub use self::{
+    io::RecvState,
+    recv_handle::{BufSpan, RecvHandle},
+};
 
 const SLOT_CHUNK_MAX: usize = SLOT_CHUNK_LEN - 1;
 const SLOT_CHUNK_LEN: usize = 1 << Info::FIELDS.slot_chunk.len as usize;
@@ -27,6 +25,7 @@ type WrappingUsize = phasesync::WrappingUsize<SLOT_CHUNK_MAX>;
 type ChunkInfo = phasesync::chunk_iter::ChunkInfo<SLOT_CHUNK_MAX>;
 
 pub mod io;
+pub mod recv_handle;
 
 pub struct RecvBuf {
     slot_buf: Phasesync,
@@ -219,94 +218,4 @@ fn list_consts() {
     );
 
     println!("fields: {:?}", Info::FIELDS);
-}
-
-#[derive(Debug)]
-pub struct RecvHandle {
-    pub buf: RecvRef,
-    pub slot: RangeInclusive<Pos>,
-    pub free: Info,
-    pub data: *mut [u8],
-    pub ctrl: *mut [RawFd],
-}
-
-/// Note:
-/// This races with [`RecvState::commit_buf_state()`] when setting `atomic_wait`.
-impl Drop for RecvHandle {
-    fn drop(&mut self) {
-        let _span = info_span!(
-            "RecvHandle::drop()",
-            slot.start = ?self.slot.start(),
-            slot.end = ?self.slot.end(),
-            free = ?self.free
-        )
-        .entered();
-        let phase = self.buf.slot_buf();
-        let free = &mut self.free;
-
-        let atomic_free = &self.buf.atomic_state().free;
-
-        info!(
-            slot.start = ?self.slot.start(),
-            slot.end = ?self.slot.end(),
-            wait = ?Info(self.buf.atomic_state().wait.load(Relaxed)),
-            ?free,
-            "dropping handle"
-        );
-
-        let atomic_wait = &self.buf.atomic_state().wait;
-        let mut wait = atomic_wait.load(Acquire);
-        match phase.free_slots(
-            self.slot.clone(),
-            Info(wait).slot_pos() - WrappingUsize::ONE,
-            |new_slot| {
-                free.set_slot_pos(new_slot);
-                atomic_free.store(free.0, Release);
-            },
-        ) {
-            FreeReturn::Successful => {
-                info!("fast_path");
-            }
-            FreeReturn::Selected { slot: selected } => {
-                info!(?selected, ?free, "slow_path");
-            }
-            FreeReturn::AllSlotsDead => {
-                atomic_free.store(free.0, Release);
-                'all_slots_dead: loop {
-                    info!(?free, "all slots dead");
-                    let new_wait = Info(wait).with_all_slots_dead(true).0;
-                    match atomic_wait.compare_exchange(wait, new_wait, Release, Acquire) {
-                        Ok(_) => {
-                            info!("successfully set all slots dead");
-                            return;
-                        }
-                        Err(actual) => {
-                            let old_pos = Info(wait).slot_pos();
-                            wait = actual;
-                            let until = Info(wait).slot_pos();
-                            if old_pos != until {
-                                match self.buf.slot_buf().set_in_search_range(old_pos..=until, |new_slot| {
-                                    free.set_slot_pos(new_slot);
-                                    atomic_free.store(free.0, Release);
-                                    info!(?free, "commit");
-                                }) {
-                                    FreeReturn::Successful => {
-                                        info!("fast_path");
-                                        return;
-                                    }
-                                    FreeReturn::Selected { slot: selected } => {
-                                        info!(?selected, ?free, "slow_path");
-                                        return;
-                                    }
-                                    FreeReturn::AllSlotsDead => {
-                                        continue 'all_slots_dead;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

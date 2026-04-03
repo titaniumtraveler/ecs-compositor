@@ -1,3 +1,4 @@
+use crate::protocols::wayland::{wl_display, wl_registry};
 use ecs_compositor_core::{Message, RawSliceExt, Value, message_header, new_id};
 use ecs_compositor_tokio::{
     buf::{
@@ -33,6 +34,10 @@ mod protocols;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    inner().await
+}
+
+async fn inner() -> io::Result<()> {
     setup_tracing();
 
     let mut buf = RecvBuf::new();
@@ -53,7 +58,7 @@ async fn main() -> io::Result<()> {
 
     loop {
         let (handle, io_err, parse_err) = future::poll_fn(|cx| state.recv(sock.as_mut(), buf, &mut callback, cx)).await;
-        let Some(handle) = handle else {
+        let Some(mut handle) = handle else {
             info!(
                 err = ?(io_err, parse_err),
 
@@ -81,11 +86,11 @@ async fn main() -> io::Result<()> {
         info!(
             err = ?(io_err, parse_err),
 
-             handle.slot.start = ?handle.slot.start(),
-             handle.slot.end   = ?handle.slot.start(),
-            ?handle.data,
-            ?handle.ctrl,
-            ?handle.free,
+            handle.slot.start = ?handle.slot().start(),
+            handle.slot.end   = ?handle.slot().end(),
+            handle.data = ?handle.data(),
+            handle.ctrl = ?handle.ctrl(),
+            handle.free = ?handle.free(),
 
             buf.free = ?Info(buf.atomic_state().free.load(Relaxed)),
             buf.wait = ?Info(buf.atomic_state().wait.load(Relaxed)),
@@ -103,6 +108,43 @@ async fn main() -> io::Result<()> {
 
             ?callback,
         );
+
+        {
+            use {wl_display::event as wl_display, wl_registry::event as wl_registry};
+
+            let mut cursor = handle.cursor();
+            while let Some(mut buf) = cursor.read_msg(|hdr| {
+                Ok(match (hdr.object_id.id().get(), hdr.opcode) {
+                    (1, wl_display::delete_id::OP) => wl_display::delete_id::FDS,
+                    (1, wl_display::error::OP) => wl_display::error::FDS,
+                    (2, wl_registry::global::OP) => wl_registry::global::FDS,
+                    (2, wl_registry::global_remove::OP) => wl_registry::global_remove::FDS,
+                    _ => unreachable!(),
+                })
+            })? {
+                let hdr = buf.header();
+                match (hdr.object_id.id().get(), hdr.opcode) {
+                    (1, wl_display::error::OP) => {
+                        let msg: wl_display::error = buf.msg()?;
+                        println!("{msg}");
+                    }
+                    (1, wl_display::delete_id::OP) => {
+                        let msg: wl_display::delete_id = buf.msg()?;
+                        println!("{msg}");
+                    }
+                    (2, wl_registry::global::OP) => {
+                        let msg: wl_registry::global = buf.msg()?;
+                        println!("{msg}");
+                    }
+                    (2, wl_registry::global_remove::OP) => {
+                        let msg: wl_registry::global_remove = buf.msg()?;
+                        println!("{msg}");
+                    }
+                    _ => unreachable!(),
+                };
+            }
+            println!()
+        }
     }
 
     Ok(())
@@ -132,16 +174,7 @@ fn send_get_registry(mut sock: &UnixStream) -> io::Result<()> {
         0, 0, 0, 0, //
         0, 0, 0, 0,
     ];
-    let res = unsafe {
-        libc::write(
-            sock.as_raw_fd(),
-            invalid_wayland_val.as_ptr().cast(),
-            invalid_wayland_val.len(),
-        )
-    };
-    if res == -1 {
-        return Err(io::Error::last_os_error());
-    }
+    sock.write_all(invalid_wayland_val)?;
     Ok(())
 }
 

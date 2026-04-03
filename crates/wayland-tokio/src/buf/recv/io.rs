@@ -1,6 +1,6 @@
 use crate::buf::{
     AsyncRecv, IoCount,
-    recv::{CTRL_HOLD, ChunkInfo, DATA_HOLD, Info, Pos, RecvHandle, RecvRef, Spans, WrappingUsize},
+    recv::{BufSpan, CTRL_HOLD, ChunkInfo, DATA_HOLD, Info, Pos, RecvHandle, RecvRef, Spans, WrappingUsize},
     span,
 };
 use ecs_compositor_core::{Value, message_header};
@@ -313,9 +313,6 @@ impl RecvState {
             old_start..=allocated_slots
         };
 
-        let data = buf.data_slice(handle.data, handle.data_len);
-        let ctrl = buf.ctrl_slice(handle.ctrl, handle.ctrl_len);
-
         let free = {
             let BufSpan { data, data_len, ctrl, ctrl_len, count: _ } = handle;
             *Info::new()
@@ -324,33 +321,7 @@ impl RecvState {
                 .with_slot_pos(*slot.end() + WrappingUsize::new(1))
         };
 
-        Some(RecvHandle { slot, buf, data, ctrl, free })
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct BufSpan {
-    data: usize,
-    data_len: usize,
-
-    ctrl: usize,
-    ctrl_len: usize,
-
-    count: usize,
-}
-
-impl BufSpan {
-    fn new(data: usize, ctrl: usize) -> Self {
-        Self {
-            //
-            data,
-            data_len: 0,
-
-            ctrl,
-            ctrl_len: 0,
-
-            count: 0,
-        }
+        Some(RecvHandle { slot, buf, span: handle, free })
     }
 }
 
